@@ -34,6 +34,7 @@ Please submit any patches against the meta-runbmc-nuvoton layer to the maintaine
 - [Contacts for Patches](#contacts-for-patches)
 - [Features](#features)
   * [PSU Manager](#psu-manager)
+  * [Phosphor-power](#phosphor-power)
 - [Modifications](#modifications)
 
 # Features
@@ -100,7 +101,76 @@ Redfish commands to set or get configurations of Cold Redundancy.
 
 * Tyrone Ting
 
+### Phosphor-power
+
+Phosphor-power contains codes for detecting and analyzing power faults on Witherspoon. There are several applications in this folder to achieve the goals mentioned just now. It's to provide a set of enhancements to the current OpenBMC power supply application for enterprise class systems.
+
+Some enterprise class systems may consist of a number of configuration variations including different power supply types and numbers. An application capable of communicating with the different power supplies is needed in order to initialize the power supplies, validate configurations, report invalid configurations, detect and report various faults, and report vital product data (VPD). Some of the function will be configurable to be included or excluded for use on different platforms.
+
+> _For more information, please refer to [Power Supply Monitoring Application](https://github.com/openbmc/docs/blob/master/designs/psu-monitoring.md)_.
+
+**Source URL**
+
+* [https://github.com/openbmc/phosphor-power](https://github.com/openbmc/phosphor-power)
+* [https://github.com/NTC-CCBG/bmc-dev/tree/master/openbmc/phosphor-power/0001-phosphor-power-support-on-the-Olympus-platform.patch](https://github.com/NTC-CCBG/bmc-dev/tree/master/openbmc/phosphor-power/0001-phosphor-power-support-on-the-Olympus-platform.patch)
+
+**How to use**
+
+1. Add the layers meta-aspeed and meta-openpower into the bblayer.conf in the openbmc local build/conf folder.
+2. The recipe [first-boot-set-psu](https://github.com/Nuvoton-Israel/openbmc/tree/runbmc/meta-quanta/meta-olympus-nuvoton/recipes-phosphor/power) is required in the [packagegroup-olympus-nuvoton-apps.bb](https://github.com/Nuvoton-Israel/openbmc/blob/runbmc/meta-quanta/meta-olympus-nuvoton/recipes-olympus-nuvoton/packagegroups/packagegroup-olympus-nuvoton-apps.bb).
+3. Download and apply the 0001-phosphor-power-support-on-the-Olympus-platform.patch in the openbmc root folder. For example:
+    ```
+    git am 0001-phosphor-power-support-on-the-Olympus-platform.patch
+    ```
+4. Input the following two commands in the openbmc build environment.
+    ```
+    bitbake -C fetch virtual/phosphor-settings-defaults
+    bitbake -C fetch phosphor-settings-manager
+    ```
+5. Input the following command in the openbmc build environment to build the openbmc image.
+    ```
+    bitbake obmc-phosphor-image
+    ```
+
+**Known issue**
+
+1. The [power-supply](https://github.com/openbmc/phosphor-power/tree/master/power-supply) application now works on the Olympus platform. Due to the limitation of hardware differences, other applications are not available.
+
+2. The sysfs nodes **part_number**, **serial_number**, **manufacturer**, **ccin**, **fw_version** and **input_history** are not provided for the power-supply application on the Olympus platform and hence related functions are disabled. The main monitoring function is valid.
+
+
+**Current development status of phosphor-power**
+
+Name                  | Current status                      | Note
+------------------    | ------------------------------      | ------------- 
+cold-redundancy       | not installed in the obmc image     |
+phosphor-power-supply | not installed in the obmc image     |
+phosphor-regulators   | Limited operation                         | The Olymus's hardware design is different from what's predefined for phosphor-regulators.
+power-sequencer       | Not operational                     | There is no power sequencer like ucd90160 on Olympus provided by power-sequencer as an example.
+power-supply          | Operational                         | It supports one PSU on Olympus by default and PSU numbers could be extended.
+
+
+**Current development status of power-supply**
+
+Function Name               | Current status                      | Note
+------------------------    | ------------------------------      | -------------
+PowerSupply                 | Operational                         | The constructor function checks the initial status of the PSU and subscribes any changes on the PSU via dbus.
+updatePresence              | Operational                         | Check the **Present** property from the inventory manager.
+updatePowerState            | Operational                         | Check the **pgood** property from the power service.
+analyze                     | Operational                         | It's responsible for monitoring the PSU status and commits logs if faults are found.
+updateInventory             | Not operational                     | It requires **part_number**, **serial_number**, **manufacturer**, **ccin**, and **fw_version** sysfs nodes provided by the pmbus driver and not ready yet.
+updateHistory               | Not operational                     | It gets information via the sysfs node **input_history** provided by the pmbus driver. The IBM Cffps pmbus driver is an example and it's not available on Olympus.
+syncHistory                 | Not operational                     | It expects that the PSU updates its internal history status via toggling a gpio and it's not available in the Olympus PSU.
+
+
+> _The commit id for this documentation is [d114cd9](https://github.com/openbmc/phosphor-power/commit/d114cd94ac175eb9ad6f2d2ce75af14069bccc47)_.
+
+**Maintainer**
+
+* Tyrone Ting
+
 
 # Modifications
 
 * 2020.03.25 First release ReadME.md
+* 2020.04.08 Update Phosphor-power

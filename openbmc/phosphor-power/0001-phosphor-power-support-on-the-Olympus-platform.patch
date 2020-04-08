@@ -1,0 +1,545 @@
+From 16037c4d114b5b82427e33e9c760e388e32fc2b3 Mon Sep 17 00:00:00 2001
+From: kfting <kfting@nuvoton.com>
+Date: Wed, 8 Apr 2020 11:08:43 +0800
+Subject: [PATCH] phosphor-power support on the Olympus platform
+
+Signed-off-by: kfting <kfting@nuvoton.com>
+---
+ .../recipes-kernel/linux/linux-nuvoton_git.bb |   1 -
+ .../recipes-phosphor/power/phosphor-power.inc |   2 +-
+ .../power/phosphor-power_git.bb               |  11 ++
+ .../conf/machine/olympus-nuvoton.conf         |   2 +
+ .../packagegroup-olympus-nuvoton-apps.bb      |   2 +
+ ...or-psu-manager-psupresence-interface.patch |  91 ++++++++++
+ .../dbus/phosphor-dbus-interfaces_%.bbappend  |   1 +
+ .../associations.json                         |  17 ++
+ ...001-port-phosphor-power-onto-Olympus.patch | 164 ++++++++++++++++++
+ .../power-supply-monitor-0.conf               |   4 +
+ .../power-supply-monitor-1.conf               |   4 +
+ .../power-supply-monitor@.service             |  20 +++
+ .../power/phosphor-power/psu.json             |  34 ++++
+ .../power/phosphor-power_%.bbappend           |  21 +++
+ .../psu-presence.override.yml                 |  10 ++
+ .../phosphor-settings-manager_%.bbappend      |   1 +
+ 16 files changed, 383 insertions(+), 2 deletions(-)
+ create mode 100644 meta-quanta/meta-olympus-nuvoton/recipes-phosphor/dbus/phosphor-dbus-interfaces/0001-add-support-for-psu-manager-psupresence-interface.patch
+ create mode 100644 meta-quanta/meta-olympus-nuvoton/recipes-phosphor/power/phosphor-power/0001-port-phosphor-power-onto-Olympus.patch
+ create mode 100644 meta-quanta/meta-olympus-nuvoton/recipes-phosphor/power/phosphor-power/obmc/power-supply-monitor/power-supply-monitor-0.conf
+ create mode 100644 meta-quanta/meta-olympus-nuvoton/recipes-phosphor/power/phosphor-power/obmc/power-supply-monitor/power-supply-monitor-1.conf
+ create mode 100644 meta-quanta/meta-olympus-nuvoton/recipes-phosphor/power/phosphor-power/power-supply-monitor@.service
+ create mode 100644 meta-quanta/meta-olympus-nuvoton/recipes-phosphor/power/phosphor-power/psu.json
+ create mode 100644 meta-quanta/meta-olympus-nuvoton/recipes-phosphor/power/phosphor-power_%.bbappend
+ create mode 100644 meta-quanta/meta-olympus-nuvoton/recipes-phosphor/settings/phosphor-settings-manager/psu-presence.override.yml
+
+diff --git a/meta-nuvoton/recipes-kernel/linux/linux-nuvoton_git.bb b/meta-nuvoton/recipes-kernel/linux/linux-nuvoton_git.bb
+index d3f81907e..55da022d5 100644
+--- a/meta-nuvoton/recipes-kernel/linux/linux-nuvoton_git.bb
++++ b/meta-nuvoton/recipes-kernel/linux/linux-nuvoton_git.bb
+@@ -9,5 +9,4 @@ SRC_URI_append_nuvoton = " file://0001-Revert-mtd-spi-nor-fix-options-for-mx66l5
+ SRC_URI_append_nuvoton = " file://0002-add-tps53622-and-tps53659.patch"
+ SRC_URI_append_nuvoton = " file://0003-i2c-nuvoton-npcm750-runbmc-integrate-the-slave-mqueu.patch"
+ SRC_URI_append_nuvoton = " file://0004-driver-ncsi-replace-del-timer-sync.patch"
+-SRC_URI_append_nuvoton = " file://0005-dts-runbmc-olympus-remove-psu.patch"
+ SRC_URI_append_nuvoton = " file://0006-npcm7xx-misc-vdmx-driver.patch"
+diff --git a/meta-phosphor/recipes-phosphor/power/phosphor-power.inc b/meta-phosphor/recipes-phosphor/power/phosphor-power.inc
+index 65ba223b1..61d1c22e5 100644
+--- a/meta-phosphor/recipes-phosphor/power/phosphor-power.inc
++++ b/meta-phosphor/recipes-phosphor/power/phosphor-power.inc
+@@ -2,4 +2,4 @@ HOMEPAGE = "https://github.com/openbmc/phosphor-power"
+ LICENSE = "Apache-2.0"
+ LIC_FILES_CHKSUM = "file://${S}/LICENSE;md5=e3fc50a88d0a364313df4b21ef20c29e"
+ SRC_URI += "git://github.com/openbmc/phosphor-power"
+-SRCREV = "0dcbdf57b706eabbc3b59198954136fb831fd2bf"
++SRCREV = "d114cd94ac175eb9ad6f2d2ce75af14069bccc47"
+diff --git a/meta-phosphor/recipes-phosphor/power/phosphor-power_git.bb b/meta-phosphor/recipes-phosphor/power/phosphor-power_git.bb
+index 5ae3d9664..c71064558 100644
+--- a/meta-phosphor/recipes-phosphor/power/phosphor-power_git.bb
++++ b/meta-phosphor/recipes-phosphor/power/phosphor-power_git.bb
+@@ -25,7 +25,18 @@ DEPENDS += " \
+          i2c-tools \
+          "
+ 
++PACKAGE_BEFORE_PN = "phosphor-psu-monitor"
++FILES_phosphor-psu-monitor = "${bindir}/phosphor-psu-monitor \
++                              ${systemd_system_unitdir}/phosphor-psu-monitor.service"
++
+ SEQ_MONITOR_SVC = "pseq-monitor.service"
+ SEQ_PGOOD_SVC = "pseq-monitor-pgood.service"
+ PSU_MONITOR_TMPL = "power-supply-monitor@.service"
+ SYSTEMD_SERVICE_${PN} += "${SEQ_MONITOR_SVC} ${SEQ_PGOOD_SVC} ${PSU_MONITOR_TMPL}"
++
++# Package all phosphor-regulators config files
++FILES_${PN} += "${datadir}/phosphor-regulators"
++
++# ${PN}-regulators service/systemd setup
++REGS_SVC = "phosphor-regulators.service"
++SYSTEMD_SERVICE_${PN} += "${REGS_SVC}"
+diff --git a/meta-quanta/meta-olympus-nuvoton/conf/machine/olympus-nuvoton.conf b/meta-quanta/meta-olympus-nuvoton/conf/machine/olympus-nuvoton.conf
+index d9ffab18a..bc084e9a2 100644
+--- a/meta-quanta/meta-olympus-nuvoton/conf/machine/olympus-nuvoton.conf
++++ b/meta-quanta/meta-olympus-nuvoton/conf/machine/olympus-nuvoton.conf
+@@ -13,6 +13,8 @@ FLASH_RWFS_OFFSET = "29696"
+ UBOOT_MACHINE = "PolegRunBMC_defconfig"
+ IGPS_MACHINE = "RunBMC"
+ 
++OBMC_POWER_SUPPLY_INSTANCES = "0"
++
+ IMAGE_FSTYPES += " cpio.${INITRAMFS_CTYPE}.u-boot"
+ 
+ OBMC_MACHINE_FEATURES += "\
+diff --git a/meta-quanta/meta-olympus-nuvoton/recipes-olympus-nuvoton/packagegroups/packagegroup-olympus-nuvoton-apps.bb b/meta-quanta/meta-olympus-nuvoton/recipes-olympus-nuvoton/packagegroups/packagegroup-olympus-nuvoton-apps.bb
+index 2be2c7ecc..59c92fcaa 100644
+--- a/meta-quanta/meta-olympus-nuvoton/recipes-olympus-nuvoton/packagegroups/packagegroup-olympus-nuvoton-apps.bb
++++ b/meta-quanta/meta-olympus-nuvoton/recipes-olympus-nuvoton/packagegroups/packagegroup-olympus-nuvoton-apps.bb
+@@ -59,4 +59,6 @@ RDEPENDS_${PN}-system = " \
+         iptables \
+         iptable-save \
+         pch-time-sync \
++        phosphor-power \
++        phosphor-power-systemd-links \
+         "
+diff --git a/meta-quanta/meta-olympus-nuvoton/recipes-phosphor/dbus/phosphor-dbus-interfaces/0001-add-support-for-psu-manager-psupresence-interface.patch b/meta-quanta/meta-olympus-nuvoton/recipes-phosphor/dbus/phosphor-dbus-interfaces/0001-add-support-for-psu-manager-psupresence-interface.patch
+new file mode 100644
+index 000000000..1dd76fde8
+--- /dev/null
++++ b/meta-quanta/meta-olympus-nuvoton/recipes-phosphor/dbus/phosphor-dbus-interfaces/0001-add-support-for-psu-manager-psupresence-interface.patch
+@@ -0,0 +1,91 @@
++From 7ecb3049ed2f41dc5f11a862d8e7cb8418705421 Mon Sep 17 00:00:00 2001
++From: kfting <kfting@nuvoton.com>
++Date: Thu, 12 Mar 2020 11:56:45 +0800
++Subject: [PATCH] add support for psu-manager psupresence interface
++
++Signed-off-by: kfting <kfting@nuvoton.com>
++---
++ .../Configuration/PSUPresence.interface.yaml      | 15 +++++++++++++++
++ .../Configuration/PURedundancy.interface.yaml     | 11 +++++++++++
++ .../Configuration/pmbus.interface.yaml            | 15 +++++++++++++++
++ .../Control/PowerSupplyRedundancy.interface.yaml  |  2 --
++ 4 files changed, 41 insertions(+), 2 deletions(-)
++ create mode 100644 xyz/openbmc_project/Configuration/PSUPresence.interface.yaml
++ create mode 100644 xyz/openbmc_project/Configuration/PURedundancy.interface.yaml
++ create mode 100644 xyz/openbmc_project/Configuration/pmbus.interface.yaml
++
++diff --git a/xyz/openbmc_project/Configuration/PSUPresence.interface.yaml b/xyz/openbmc_project/Configuration/PSUPresence.interface.yaml
++new file mode 100644
++index 0000000..e65f975
++--- /dev/null
+++++ b/xyz/openbmc_project/Configuration/PSUPresence.interface.yaml
++@@ -0,0 +1,15 @@
+++description: >
+++    An interface for psu-manager configuration.
+++properties:
+++    - name: Name
+++      type: string
+++      description: >
+++          The configuration.
+++    - name: Bus
+++      type: uint64
+++      description: >
+++          The bus where a PSU is located.
+++    - name: Address
+++      type: array[uint64]
+++      description: >
+++          The PSU address.
++diff --git a/xyz/openbmc_project/Configuration/PURedundancy.interface.yaml b/xyz/openbmc_project/Configuration/PURedundancy.interface.yaml
++new file mode 100644
++index 0000000..0b50d8e
++--- /dev/null
+++++ b/xyz/openbmc_project/Configuration/PURedundancy.interface.yaml
++@@ -0,0 +1,11 @@
+++description: >
+++    An interface for psu-manager puredundancy configuration.
+++properties:
+++    - name: Name
+++      type: string
+++      description: >
+++          The configuration.
+++    - name: RedundantCount
+++      type: uint64
+++      description: >
+++          redundancy count.
++diff --git a/xyz/openbmc_project/Configuration/pmbus.interface.yaml b/xyz/openbmc_project/Configuration/pmbus.interface.yaml
++new file mode 100644
++index 0000000..b93374f
++--- /dev/null
+++++ b/xyz/openbmc_project/Configuration/pmbus.interface.yaml
++@@ -0,0 +1,15 @@
+++description: >
+++    An interface for psu-manager pmbus configuration.
+++properties:
+++    - name: Name
+++      type: string
+++      description: >
+++          The configuration.
+++    - name: Bus
+++      type: uint64
+++      description: >
+++          The bus where a PSU is located. 
+++    - name: Address
+++      type: uint64
+++      description: >
+++          The PSU address.
++diff --git a/xyz/openbmc_project/Control/PowerSupplyRedundancy.interface.yaml b/xyz/openbmc_project/Control/PowerSupplyRedundancy.interface.yaml
++index e02e0aa..64f1b28 100644
++--- a/xyz/openbmc_project/Control/PowerSupplyRedundancy.interface.yaml
+++++ b/xyz/openbmc_project/Control/PowerSupplyRedundancy.interface.yaml
++@@ -3,8 +3,6 @@ description: >
++ properties:
++     - name: PowerSupplyRedundancyEnabled
++       type: boolean
++-      flags:
++-        - const
++       description: >
++           When true, the power supplies are redundant.
++     - name: RotationEnabled
++-- 
++2.17.1
++
+diff --git a/meta-quanta/meta-olympus-nuvoton/recipes-phosphor/dbus/phosphor-dbus-interfaces_%.bbappend b/meta-quanta/meta-olympus-nuvoton/recipes-phosphor/dbus/phosphor-dbus-interfaces_%.bbappend
+index a341b500e..8568cb239 100644
+--- a/meta-quanta/meta-olympus-nuvoton/recipes-phosphor/dbus/phosphor-dbus-interfaces_%.bbappend
++++ b/meta-quanta/meta-olympus-nuvoton/recipes-phosphor/dbus/phosphor-dbus-interfaces_%.bbappend
+@@ -3,3 +3,4 @@ FILESEXTRAPATHS_prepend_olympus-nuvoton := "${THISDIR}/${PN}:"
+ SRC_URI_append_olympus-nuvoton = " file://0001-Add-sensor-threshold-error-items.patch"
+ SRC_URI_append_olympus-nuvoton = " file://0001-set-watchdog-Interval-value-to-three-minutes.patch"
+ SRC_URI_append_olympus-nuvoton = " file://0001-add-error-WatchdogTimedOut-under-Control.Boot.patch"
++SRC_URI_append_olympus-nuvoton = " file://0001-add-support-for-psu-manager-psupresence-interface.patch"
+diff --git a/meta-quanta/meta-olympus-nuvoton/recipes-phosphor/inventory/phosphor-inventory-manager/associations.json b/meta-quanta/meta-olympus-nuvoton/recipes-phosphor/inventory/phosphor-inventory-manager/associations.json
+index 1119d68e5..feef87a07 100644
+--- a/meta-quanta/meta-olympus-nuvoton/recipes-phosphor/inventory/phosphor-inventory-manager/associations.json
++++ b/meta-quanta/meta-olympus-nuvoton/recipes-phosphor/inventory/phosphor-inventory-manager/associations.json
+@@ -22,6 +22,23 @@
+             }
+         ]
+     },
++    {
++        "path": "system/chassis/motherboard/powersupply0",
++        "endpoints":
++        [
++            {
++                "types":
++                {
++                    "rType": "inventory",
++                    "fType": "fault"
++                },
++                "paths":
++                [
++                    "/xyz/openbmc_project/logging/entry/1"
++                ]
++            }
++        ]
++    },
+     {
+         "path": "system/chassis/motherboard/powersupply1",
+         "endpoints":
+diff --git a/meta-quanta/meta-olympus-nuvoton/recipes-phosphor/power/phosphor-power/0001-port-phosphor-power-onto-Olympus.patch b/meta-quanta/meta-olympus-nuvoton/recipes-phosphor/power/phosphor-power/0001-port-phosphor-power-onto-Olympus.patch
+new file mode 100644
+index 000000000..65ea6bb3a
+--- /dev/null
++++ b/meta-quanta/meta-olympus-nuvoton/recipes-phosphor/power/phosphor-power/0001-port-phosphor-power-onto-Olympus.patch
+@@ -0,0 +1,164 @@
++From 5796c4eac66bc227c13681d8b90e5bebb2211cfc Mon Sep 17 00:00:00 2001
++From: kfting <kfting@nuvoton.com>
++Date: Wed, 8 Apr 2020 10:26:34 +0800
++Subject: [PATCH] port phosphor-power onto Olympus
++
++1. It supports one PSU by default.
++2. Add the layers meta-aspeed and meta-openpower into bblayers.conf.
++
++Signed-off-by: kfting <kfting@nuvoton.com>
++---
++ power-supply/power_supply.cpp | 73 +++++++++++++++++++++++++++++++++--
++ utility.cpp                   |  3 +-
++ 2 files changed, 71 insertions(+), 5 deletions(-)
++
++diff --git a/power-supply/power_supply.cpp b/power-supply/power_supply.cpp
++index aa7588e..f2954f2 100644
++--- a/power-supply/power_supply.cpp
+++++ b/power-supply/power_supply.cpp
++@@ -28,6 +28,9 @@
++ #include <phosphor-logging/log.hpp>
++ #include <xyz/openbmc_project/Common/Device/error.hpp>
++ 
+++#include <boost/container/flat_map.hpp>
+++#include <sdbusplus/bus.hpp>
+++
++ #include <functional>
++ 
++ namespace phosphor
++@@ -41,6 +44,19 @@ using namespace phosphor::logging;
++ using namespace sdbusplus::org::open_power::Witherspoon::Fault::Error;
++ using namespace sdbusplus::xyz::openbmc_project::Common::Device::Error;
++ 
+++using GetManagedPropertyType = boost::container::flat_map<
+++    std::string,
+++    sdbusplus::message::variant<std::string, bool, uint8_t, int16_t, uint16_t,
+++    int32_t, uint32_t, int64_t, uint64_t, double>>;
+++
+++using GetManagedObjectsType = boost::container::flat_map<
+++    sdbusplus::message::object_path,
+++    boost::container::flat_map<std::string, GetManagedPropertyType>>;
+++
+++constexpr auto LOGGING_SERVICE = "xyz.openbmc_project.Logging";
+++constexpr auto LOGGING_OBJECT = "/xyz/openbmc_project/logging";
+++constexpr auto OBJM_INTF = "org.freedesktop.DBus.ObjectManager";
+++
++ PowerSupply::PowerSupply(const std::string& name, size_t inst,
++                          const std::string& objpath, const std::string& invpath,
++                          sdbusplus::bus::bus& bus, const sdeventplus::Event& e,
++@@ -57,7 +73,7 @@ PowerSupply::PowerSupply(const std::string& name, size_t inst,
++                      syncHistory();
++ 
++                      // Update the inventory for the new device
++-                     updateInventory();
+++                     //updateInventory();
++                  })),
++     powerOnInterval(t),
++     powerOnTimer(e, std::bind([this]() { this->powerOn = true; }))
++@@ -90,7 +106,8 @@ PowerSupply::PowerSupply(const std::string& name, size_t inst,
++     updatePresence();
++ 
++     // Write the SN, PN, etc to the inventory
++-    updateInventory();
+++    // For now, the attribute nodes don't exist.
+++    //updateInventory();
++ 
++     // Subscribe to power state changes
++     powerOnMatch = std::make_unique<match_t>(
++@@ -196,7 +213,7 @@ void PowerSupply::inventoryChanged(sdbusplus::message::message& msg)
++             presentTimer.setEnabled(false);
++ 
++             // Clear out the now outdated inventory properties
++-            updateInventory();
+++            //updateInventory();
++         }
++     }
++ 
++@@ -219,7 +236,9 @@ void PowerSupply::powerStateChanged(sdbusplus::message::message& msg)
++     msg.read(msgSensor, msgData);
++ 
++     // Check if it was the Present property that changed.
++-    auto valPropMap = msgData.find("state");
+++    // check pgood for now.
+++    //auto valPropMap = msgData.find("state");
+++    auto valPropMap = msgData.find("pgood");
++     if (valPropMap != msgData.end())
++     {
++         state =
++@@ -558,6 +577,51 @@ void PowerSupply::resolveError(const std::string& callout,
++ 
++     try
++     {
+++        auto method = bus.new_method_call(LOGGING_SERVICE,
+++                      LOGGING_OBJECT,
+++                      OBJM_INTF, "GetManagedObjects");
+++        auto reply = bus.call(method);
+++        GetManagedObjectsType result;
+++        reply.read(result);
+++        auto intf_found = false;
+++        std::string *logmessage = nullptr;
+++        if (!result.empty())
+++        {
+++            for (auto &objectPath : result)
+++            {
+++                for (auto &interfaceMap : objectPath.second)
+++                {
+++                    if ("xyz.openbmc_project.Logging.Entry" ==
+++                            interfaceMap.first)
+++                    {
+++                        for (auto &propertyMap : interfaceMap.second)
+++                        {
+++                            if (propertyMap.first == "Message")
+++                            {
+++                                logmessage = std::get_if<std::string>(
+++                                        &propertyMap.second);
+++                                if (nullptr != logmessage)
+++                                {
+++                                    if (message == *logmessage)
+++                                    {
+++                                        // Log entry matches call out and message, set Resolved to true
+++                                        bool resolved = true;
+++                                        util::setProperty(interfaceMap.first,
+++                                                RESOLVED_PROP, objectPath.first,
+++                                                LOGGING_SERVICE, bus, resolved);
+++                                    }
+++                                }
+++                            }
+++                        }
+++                    }
+++                }
+++            }
+++
+++        }
+++
+++        return;
+++
+++#if 0
++         auto path = callout + "/fault";
++         // Get the service name from the mapper for the fault callout
++         auto service = util::getService(path, ASSOCIATION_IFACE, bus);
++@@ -597,6 +661,7 @@ void PowerSupply::resolveError(const std::string& callout,
++                                   logEntryService, bus, resolved);
++             }
++         }
+++#endif
++     }
++     catch (std::exception& e)
++     {
++diff --git a/utility.cpp b/utility.cpp
++index 75ecb80..ade5c8f 100644
++--- a/utility.cpp
+++++ b/utility.cpp
++@@ -113,7 +113,8 @@ bool isPoweredOn(sdbusplus::bus::bus& bus, bool defaultState)
++     {
++         // When state = 1, system is powered on
++         auto service = util::getService(POWER_OBJ_PATH, POWER_IFACE, bus);
++-        getProperty<int32_t>(POWER_IFACE, "state", POWER_OBJ_PATH, service, bus,
+++        //getProperty<int32_t>(POWER_IFACE, "state", POWER_OBJ_PATH, service, bus,
+++        getProperty<int32_t>(POWER_IFACE, "pgood", POWER_OBJ_PATH, service, bus,
++                              state);
++     }
++     catch (std::exception& e)
++-- 
++2.17.1
++
+diff --git a/meta-quanta/meta-olympus-nuvoton/recipes-phosphor/power/phosphor-power/obmc/power-supply-monitor/power-supply-monitor-0.conf b/meta-quanta/meta-olympus-nuvoton/recipes-phosphor/power/phosphor-power/obmc/power-supply-monitor/power-supply-monitor-0.conf
+new file mode 100644
+index 000000000..86d1b4bd7
+--- /dev/null
++++ b/meta-quanta/meta-olympus-nuvoton/recipes-phosphor/power/phosphor-power/obmc/power-supply-monitor/power-supply-monitor-0.conf
+@@ -0,0 +1,4 @@
++DEVPATH=/sys/bus/i2c/devices/2-0058
++INSTANCE=0
++INVENTORY=/system/chassis/motherboard/powersupply0
++NUM_HISTORY_RECORDS=120
+diff --git a/meta-quanta/meta-olympus-nuvoton/recipes-phosphor/power/phosphor-power/obmc/power-supply-monitor/power-supply-monitor-1.conf b/meta-quanta/meta-olympus-nuvoton/recipes-phosphor/power/phosphor-power/obmc/power-supply-monitor/power-supply-monitor-1.conf
+new file mode 100644
+index 000000000..7392b642d
+--- /dev/null
++++ b/meta-quanta/meta-olympus-nuvoton/recipes-phosphor/power/phosphor-power/obmc/power-supply-monitor/power-supply-monitor-1.conf
+@@ -0,0 +1,4 @@
++DEVPATH=/sys/bus/i2c/devices/7-0058
++INSTANCE=1
++INVENTORY=/system/chassis/motherboard/powersupply1
++NUM_HISTORY_RECORDS=120
+diff --git a/meta-quanta/meta-olympus-nuvoton/recipes-phosphor/power/phosphor-power/power-supply-monitor@.service b/meta-quanta/meta-olympus-nuvoton/recipes-phosphor/power/phosphor-power/power-supply-monitor@.service
+new file mode 100644
+index 000000000..c4f551e89
+--- /dev/null
++++ b/meta-quanta/meta-olympus-nuvoton/recipes-phosphor/power/phosphor-power/power-supply-monitor@.service
+@@ -0,0 +1,20 @@
++[Unit]
++Description=Power Supply %I Monitor
++Wants=mapper-wait@-xyz-openbmc_project-inventory-system-chassis-motherboard-powersupply%i.service
++After=mapper-wait@-xyz-openbmc_project-inventory-system-chassis-motherboard-powersupply%i.service
++Wants=mapper-wait@-org-openbmc-control-power0.service
++After=mapper-wait@-org-openbmc-control-power0.service
++After=mapper-wait@-xyz-openbmc_project-inventory.service
++Wants=first-boot-set-psu@0-2-0x58.service
++After=first-boot-set-psu@0-2-0x58.service
++ConditionPathExists=/etc/default/obmc/power-supply-monitor/power-supply-monitor-%i.conf
++
++[Service]
++EnvironmentFile=/etc/default/obmc/power-supply-monitor/power-supply-monitor-%i.conf
++ExecStartPre=/bin/sh -c "mapper wait /xyz/openbmc_project/inventory/system/chassis/motherboard/powersupply%i"
++ExecStartPre=/bin/sh -c "sleep 5"
++ExecStart=/usr/bin/env psu-monitor --path=${{DEVPATH}} --instance=${{INSTANCE}} --inventory=${{INVENTORY}} --num-history-records=${{NUM_HISTORY_RECORDS}} --sync-gpio-path=${{SYNC_GPIO_PATH}} --sync-gpio-num=${{SYNC_GPIO_NUM}}
++SyslogIdentifier=psu-monitor
++
++[Install]
++RequiredBy=multi-user.target
+diff --git a/meta-quanta/meta-olympus-nuvoton/recipes-phosphor/power/phosphor-power/psu.json b/meta-quanta/meta-olympus-nuvoton/recipes-phosphor/power/phosphor-power/psu.json
+new file mode 100644
+index 000000000..84ad66f88
+--- /dev/null
++++ b/meta-quanta/meta-olympus-nuvoton/recipes-phosphor/power/phosphor-power/psu.json
+@@ -0,0 +1,34 @@
++{
++  "inventoryPMBusAccessType": "Hwmon",
++  "fruConfigs": [
++    {
++      "propertyName": "PartNumber",
++      "fileName": "part_number",
++      "interface": "xyz.openbmc_project.Inventory.Decorator.Asset"
++    },
++    {
++      "propertyName": "SerialNumber",
++      "fileName": "serial_number",
++      "interface": "xyz.openbmc_project.Inventory.Decorator.Asset"
++    },
++    {
++      "propertyName": "Manufacturer",
++      "fileName": "manufacturer",
++      "interface": "xyz.openbmc_project.Inventory.Decorator.Asset"
++    },
++    {
++      "propertyName": "Model",
++      "fileName": "model",
++      "interface": "xyz.openbmc_project.Inventory.Decorator.Asset"
++    },
++    {
++      "propertyName": "Version",
++      "fileName": "fw_version",
++      "interface": "xyz.openbmc_project.Software.Version"
++    }
++  ],
++  "psuDevices": {
++    "/xyz/openbmc_project/inventory/system/chassis/motherboard/powersupply0" : "/sys/bus/i2c/devices/2-0058",
++    "/xyz/openbmc_project/inventory/system/chassis/motherboard/powersupply1" : "/sys/bus/i2c/devices/7-0058"
++  }
++}
+diff --git a/meta-quanta/meta-olympus-nuvoton/recipes-phosphor/power/phosphor-power_%.bbappend b/meta-quanta/meta-olympus-nuvoton/recipes-phosphor/power/phosphor-power_%.bbappend
+new file mode 100644
+index 000000000..2a5007831
+--- /dev/null
++++ b/meta-quanta/meta-olympus-nuvoton/recipes-phosphor/power/phosphor-power_%.bbappend
+@@ -0,0 +1,21 @@
++FILESEXTRAPATHS_prepend := "${THISDIR}/${PN}:"
++
++inherit obmc-phosphor-systemd
++
++SRC_URI_append_olympus-nuvoton = " file://power-supply-monitor@.service" 
++SRC_URI_append_olympus-nuvoton = " file://psu.json" 
++SRC_URI_append_olympus-nuvoton = " file://0001-port-phosphor-power-onto-Olympus.patch"
++
++PSU_MONITOR_ENV_FMT_append_olympus-nuvoton = "obmc/power-supply-monitor/power-supply-monitor-{0}.conf"
++
++SYSTEMD_ENVIRONMENT_FILE_${PN}_append_olympus-nuvoton += "${@compose_list(d, 'PSU_MONITOR_ENV_FMT', 'OBMC_POWER_SUPPLY_INSTANCES')}"
++
++FILES_${PN}_append_olympus-nuvoton += "${datadir}/phosphor-power/psu.json"
++
++do_install_append() {
++
++    install -D ${WORKDIR}/power-supply-monitor@.service ${D}${systemd_unitdir}/system/power-supply-monitor@.service
++
++    install -D ${WORKDIR}/psu.json ${D}${datadir}/phosphor-power/psu.json
++}
++
+diff --git a/meta-quanta/meta-olympus-nuvoton/recipes-phosphor/settings/phosphor-settings-manager/psu-presence.override.yml b/meta-quanta/meta-olympus-nuvoton/recipes-phosphor/settings/phosphor-settings-manager/psu-presence.override.yml
+new file mode 100644
+index 000000000..02c2a1198
+--- /dev/null
++++ b/meta-quanta/meta-olympus-nuvoton/recipes-phosphor/settings/phosphor-settings-manager/psu-presence.override.yml
+@@ -0,0 +1,10 @@
++---
++/xyz/openbmc_project/inventory/system/chassis/motherboard:
++    - Interface: xyz.openbmc_project.Configuration.PSUPresence
++      Properties:
++          Name:
++             Default: '"psu0"'
++          Bus:
++             Default: 2
++          Address:
++             Default: '{88}'
+diff --git a/meta-quanta/meta-olympus-nuvoton/recipes-phosphor/settings/phosphor-settings-manager_%.bbappend b/meta-quanta/meta-olympus-nuvoton/recipes-phosphor/settings/phosphor-settings-manager_%.bbappend
+index 6810c5ca9..3ef4315d7 100644
+--- a/meta-quanta/meta-olympus-nuvoton/recipes-phosphor/settings/phosphor-settings-manager_%.bbappend
++++ b/meta-quanta/meta-olympus-nuvoton/recipes-phosphor/settings/phosphor-settings-manager_%.bbappend
+@@ -2,3 +2,4 @@ FILESEXTRAPATHS_append_olympus-nuvoton := "${THISDIR}/${PN}:"
+ 
+ SRC_URI_append_olympus-nuvoton = " file://chassis-cap.override.yml"
+ SRC_URI_append_olympus-nuvoton = " file://sol-default.override.yml"
++SRC_URI_append_olympus-nuvoton = " file://psu-presence.override.yml"
+-- 
+2.17.1
+
