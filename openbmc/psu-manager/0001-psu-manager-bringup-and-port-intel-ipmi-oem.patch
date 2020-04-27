@@ -5,7 +5,7 @@ Subject: [PATCH] psu-manager bringup and port intel-ipmi-oem
 
 1. Add meta-intel into the bblayer.conf
 2. Do not build rsyslog by renaming meta-intel/meta-common/recipes-extended/rsyslog/rsyslog_%.bbappend
-3. Do not build phosphor-ipmi-host by renaming meta-intel/meta-common/recipes-extended/rsyslog/rsyslog_%.bbappend
+3. Do not build phosphor-ipmi-host by renaming meta-intel/meta-common/recipes-phosphor/ipmi/phosphor-ipmi-host_%.bbappend
 
 Signed-off-by: kfting <kfting@nuvoton.com>
 ---
