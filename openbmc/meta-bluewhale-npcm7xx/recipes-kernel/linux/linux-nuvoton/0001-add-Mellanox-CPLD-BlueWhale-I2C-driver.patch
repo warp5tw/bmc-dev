@@ -1,0 +1,1375 @@
+From 1017801b61c158bd4de13dc916e3e60755b80e39 Mon Sep 17 00:00:00 2001
+From: Joseph Liu <kwliu@nuvoton.com>
+Date: Tue, 9 Jun 2020 14:17:33 +0800
+Subject: [PATCH] add Mellanox CPLD BlueWhale I2C driver
+
+---
+ drivers/mfd/Kconfig                           |   10 +
+ drivers/mfd/Makefile                          |    1 +
+ drivers/mfd/mlxcpld-bw.c                      | 1214 +++++++++++++++++
+ include/linux/platform_data/mlxcpld-hotplug.h |   99 ++
+ 4 files changed, 1324 insertions(+)
+ create mode 100644 drivers/mfd/mlxcpld-bw.c
+ create mode 100644 include/linux/platform_data/mlxcpld-hotplug.h
+
+diff --git a/drivers/mfd/Kconfig b/drivers/mfd/Kconfig
+index 36d85144e485..6e6335b665df 100644
+--- a/drivers/mfd/Kconfig
++++ b/drivers/mfd/Kconfig
+@@ -1890,6 +1890,16 @@ config MFD_WM97xx
+ 	  support for the WM97xx, in order to use the actual functionaltiy of
+ 	  the device other drivers must be enabled.
+ 
++config MFD_MLXCPLD_BW
++        tristate "Mellanox BlueWhale CPLD Hardware Control"
++        depends on I2C
++        help
++          Say Y here to include support for the Mellanox BMC
++          hardware control.
++
++          This driver can also be built as a module. If so the module
++          will be called mlxcpld-bw.
++
+ config MFD_STW481X
+ 	tristate "Support for ST Microelectronics STw481x"
+ 	depends on I2C && (ARCH_NOMADIK || COMPILE_TEST)
+diff --git a/drivers/mfd/Makefile b/drivers/mfd/Makefile
+index 07722f3d80b6..bcfa0503db23 100644
+--- a/drivers/mfd/Makefile
++++ b/drivers/mfd/Makefile
+@@ -71,6 +71,7 @@ obj-$(CONFIG_MFD_WM8350_I2C)	+= wm8350-i2c.o
+ wm8994-objs			:= wm8994-core.o wm8994-irq.o wm8994-regmap.o
+ obj-$(CONFIG_MFD_WM8994)	+= wm8994.o
+ obj-$(CONFIG_MFD_WM97xx)	+= wm97xx-core.o
++obj-$(CONFIG_MFD_MLXCPLD_BW)	+= mlxcpld-bw.o
+ 
+ madera-objs			:= madera-core.o
+ ifeq ($(CONFIG_MFD_CS47L15),y)
+diff --git a/drivers/mfd/mlxcpld-bw.c b/drivers/mfd/mlxcpld-bw.c
+new file mode 100644
+index 000000000000..f73986312aa4
+--- /dev/null
++++ b/drivers/mfd/mlxcpld-bw.c
+@@ -0,0 +1,1214 @@
++/*
++ * Copyright (c) 2017 Mellanox Technologies. All rights reserved.
++ * Copyright (c) 2017 Vadim Pasternak <vadimp@mellanox.com>
++ *
++ * Redistribution and use in source and binary forms, with or without
++ * modification, are permitted provided that the following conditions are met:
++ *
++ * 1. Redistributions of source code must retain the above copyright
++ *    notice, this list of conditions and the following disclaimer.
++ * 2. Redistributions in binary form must reproduce the above copyright
++ *    notice, this list of conditions and the following disclaimer in the
++ *    documentation and/or other materials provided with the distribution.
++ * 3. Neither the names of the copyright holders nor the names of its
++ *    contributors may be used to endorse or promote products derived from
++ *    this software without specific prior written permission.
++ *
++ * Alternatively, this software may be distributed under the terms of the
++ * GNU General Public License ("GPL") version 2 as published by the Free
++ * Software Foundation.
++ *
++ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
++ * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
++ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
++ * ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE
++ * LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
++ * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
++ * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
++ * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
++ * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
++ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
++ * POSSIBILITY OF SUCH DAMAGE.
++ */
++
++#include <linux/bitops.h>
++#include <linux/device.h>
++#include <linux/gpio.h>
++#include <linux/gpio/consumer.h>
++#include <linux/hwmon.h>
++#include <linux/hwmon-sysfs.h>
++#include <linux/i2c.h>
++#include <linux/interrupt.h>
++#include <linux/io.h>
++#include <linux/module.h>
++#include <linux/of_device.h>
++#include <linux/platform_data/mlxcpld-hotplug.h>
++#include <linux/platform_device.h>
++#include <linux/regmap.h>
++#include <linux/wait.h>
++#include <linux/workqueue.h>
++
++/* Offset of event and mask registers from status register. */
++#define MLXCPLD_BW_EVENT_OFF		1
++#define MLXCPLD_BW_MASK_OFF		2
++#define MLXCPLD_BW_AGGR_MASK_OFF	1
++
++/* Attribute parameters. */
++#define MLXCPLD_BW_ATTR_VALUE_SIZE	10
++#define MLXCPLD_BW_ATTR_GROUP_NUM	9
++#define MLXCPLD_BW_ATTRS_NUM		28
++#define MLXCPLD_BW_LABEL_MAX_SIZE	24
++
++/**
++ * enum mlxcpld_bw_type
++ *
++ * @MLXCPLD_BW: basic driver type for BlueWhale CPLD;
++ */
++enum mlxcpld_bw_type {
++	MLXCPLD_BW,
++};
++
++/**
++ * enum mlxcpld_bw_attr_type - sysfs attributes for hotplug events:
++ *
++ * @MLXCPLD_BW_ATTR_PS0: power status 0;
++ * @MLXCPLD_BW_ATTR_PS1: power status 1;
++ * @MLXCPLD_BW_ATTR_PS2: power status 2;
++ * @MLXCPLD_BW_ATTR_TEMP: temp attribute;
++ * @MLXCPLD_BW_ATTR_RST: reset attribute;
++ * @MLXCPLD_BW_ATTR_MUX: mux attribute;
++ * @MLXCPLD_BW_ATTR_CLK: clock attribute;
++ * @MLXCPLD_BW_ATTR_GPRW: general purpose read/write attribute;
++ * @MLXCPLD_BW_ATTR_GPRO: general purpose read only attribute;
++ */
++enum mlxcpld_bw_attr_type {
++	MLXCPLD_BW_ATTR_PS0,
++	MLXCPLD_BW_ATTR_PS1,
++	MLXCPLD_BW_ATTR_PS2,
++	MLXCPLD_BW_ATTR_TEMP,
++	MLXCPLD_BW_ATTR_RST,
++	MLXCPLD_BW_ATTR_MUX,
++	MLXCPLD_BW_ATTR_CLK,
++	MLXCPLD_BW_ATTR_GPRW,
++	MLXCPLD_BW_ATTR_GPRO,
++};
++
++/**
++ * struct mlxcpld_bw_data - attributes control data:
++ *
++ * @label: attribute label;
++ * @reg: attribute register offset;
++ * @mask: attribute access mask;
++ * @bit: attribute effective bit;
++ * @np - pointer to node platform associated with attribute;
++ * @pdev: pointer to platform device associated with attribute;
++ * @dev: pointer to dynamic I2C devices, created upon related trigger;
++ * @count: number of trigger related dynamic I2C devices;
++ * @attached: true if device has been attached after good helath indication;
++ */
++struct mlxcpld_bw_data {
++	char label[MLXCPLD_BW_LABEL_MAX_SIZE];
++	u32 reg;
++	u32 mask;
++	u32 bit;
++	struct device_node *np;
++	struct platform_device *pdev;
++	struct mlxcpld_hotplug_device *dev;
++	u8 count;
++	bool attached;
++};
++
++/**
++ * struct mlxcpld_bw_item - same type components controlled by the driver:
++ *
++ * @data: component data;
++ * @aggr_mask: group aggregation mask;
++ * @reg: group interrupt status register;
++ * @mask: group interrupt mask;
++ * @cache: last status value for elements fro the same group;
++ * @count: number of available elements in the group;
++ * @ind: element's index inside the group;
++ */
++struct mlxcpld_bw_item {
++	struct mlxcpld_bw_data *data;
++	u8 aggr_mask;
++	u32 reg;
++	u32 mask;
++	u32 cache;
++	u8 count;
++	u8 ind;
++};
++
++/**
++ * typedef mlxcpld_bw_parse_np - parse device node parameters.
++ *
++ */
++typedef int (*mlxcpld_bw_parse_np)(struct device_node *np,
++				     struct device *dev,
++				     struct mlxcpld_bw_item *item);
++
++/**
++ * struct mlxcpld_bw_attr_group - attribute group parameters:
++ *
++ * @name: attribute group name;
++ * @type: attribute type;
++ * @access: attribute access permissions (negative for no access);
++ * @use_grp_name: use group name as basic attribute name if set true;
++ * @fpars: device node attribute parsing function;
++ */
++struct mlxcpld_bw_attr_group {
++	const char *name;
++	enum mlxcpld_bw_attr_type type;
++	int access;
++	bool use_grp_name;
++	mlxcpld_bw_parse_np fpars;
++};
++
++/**
++ * struct mlxcpld_bw_priv_data - driver's private data:
++ *
++ * @irq: platform interrupt number;
++ * @cpld_on: system ready flag;
++ * @client: i2c slave device;
++ * @regmap: register map of a device;
++ * @item: groups control data;
++ * @hwmon: hwmon device;
++ * @mlxcpld_bw_attr: sysfs attributes array;
++ * @mlxcpld_bw_dev_attr: sysfs sensor device attribute array;
++ * @group: sysfs attribute group;
++ * @groups: list of sysfs attribute group for hwmon registration;
++ * @dwork_irq: delayed work template for signal handling;
++ * @lock: spin lock;
++ * @access_lock: mutex for attribute access;
++ * @top_aggr_offset: offset of top aggregation interrupt register;
++ * @top_aggr_mask: top aggregation interrupt common mask;
++ * @aggr_cache: last value of aggregation register status;
++ * @set_handler: if set - interrupt handler should be connected;
++ * @en_dynamic_node: set to true after dynamic device node is enabled;
++ * @after_probe: flag indicating if driver is after probing complition;
++ */
++struct mlxcpld_bw_priv_data {
++	int irq;
++	int irq_gpio;
++	struct gpio_desc        *cpld_on;
++	struct i2c_client *client;
++	struct regmap *regmap;
++	struct mlxcpld_bw_item *item[MLXCPLD_BW_ATTR_GROUP_NUM];
++	struct device *hwmon;
++	struct attribute *mlxcpld_bw_attr[MLXCPLD_BW_ATTRS_NUM + 1];
++	struct sensor_device_attribute_2
++			mlxcpld_bw_dev_attr[MLXCPLD_BW_ATTRS_NUM];
++	struct attribute_group group;
++	const struct attribute_group *groups[2];
++	struct delayed_work dwork_irq;
++	spinlock_t lock;
++	struct mutex access_lock;
++	u32 top_aggr_offset;
++	u32 top_aggr_mask;
++	u32 aggr_cache;
++	bool set_handler;
++	bool en_dynamic_node;
++	bool after_probe;
++};
++
++/**
++ * Configuration for the register map of a device.
++ */
++static const struct regmap_config mlxcpld_bw_regmap_conf = {
++	.reg_bits = 16,
++	.val_bits = 8,
++	.max_register = 255,
++};
++
++/**
++ * struct device_en - Open Firmware property for enabling device
++ *
++ * @name - property name;
++ * @value - property value string;
++ * @length - length of proprty value string;
++ *
++ * The structure is used for the devices, which require some dynamic
++ * selection operation allowing access to them.
++ */
++static struct property device_en = {
++	.name = "status",
++	.value = "okay",
++	.length = sizeof("okay"),
++};
++
++/**
++ * struct device_dis - Open Firmware property for disabling device
++ *
++ * @name - property name;
++ * @value - property value string;
++ * @length - length of proprty value string;
++ *
++ * The structure is used for the devices, which require some dynamic
++ * selection operation disallowing access to them.
++ */
++static struct property device_dis = {
++	.name = "status",
++	.value = "disabled",
++	.length = sizeof("disabled"),
++};
++
++static int
++mlxcpld_bw_of_simple_parser(struct device_node *np, struct device *dev,
++			      struct mlxcpld_bw_item *item)
++{
++	struct mlxcpld_bw_data *data = item->data;
++	struct device_node *child, *of_handle;
++	const char *label;
++
++	for_each_child_of_node(np, child) {
++		if (of_property_read_string(child, "label", &label))
++			return -ENODEV;
++		strlcpy(data->label, label, MLXCPLD_BW_LABEL_MAX_SIZE);
++
++		if (of_property_read_u32(child, "reg", &data->reg))
++			return -ENODEV;
++
++		of_property_read_u32(child, "mask", &data->mask);
++		of_property_read_u32(child, "bit", &data->bit);
++
++		of_handle = of_parse_phandle(child, "of-handle", 0);
++		if (of_handle)
++			data->np = of_handle;
++
++		data++;
++	}
++
++	return 0;
++}
++
++static int mlxcpld_bw_set_hotplug_dev(struct device_node *np,
++					struct mlxcpld_hotplug_device *hpdev)
++{
++	const char *type;
++	u32 val;
++
++	if (of_property_read_string(np, "type", &type))
++		return -ENODEV;
++	strlcpy(hpdev->brdinfo.type, type, I2C_NAME_SIZE);
++
++	if (of_property_read_u32(np, "bus", &val))
++		return -ENODEV;
++	hpdev->bus = val;
++
++	if (of_property_read_u32(np, "addr", &val))
++		return -ENODEV;
++	hpdev->brdinfo.addr = val;
++
++	return 0;
++}
++
++static int
++mlxcpld_bw_of_hotplug_parser(struct device_node *np, struct device *dev,
++			       struct mlxcpld_bw_item *item)
++{
++	struct mlxcpld_bw_data *data = item->data;
++	struct device_node *child, *grandchild;
++	struct mlxcpld_hotplug_device *hpdev;
++	u32 count, val;
++	int err;
++
++	if (of_property_read_u32(np, "aggr_mask", &val))
++		return -ENODEV;
++	item->aggr_mask = val;
++
++	if (of_property_read_u32(np, "reg", &val))
++		return -ENODEV;
++	item->reg = val;
++
++	if (of_property_read_u32(np, "mask", &val))
++		return -ENODEV;
++	item->mask = val;
++
++	for_each_child_of_node(np, child) {
++		count = of_get_child_count(child);
++		/* Only one hotplug device is defined for trigger. */
++		if (!count)
++			data->count = 1;
++		else
++			data->count = count;
++		data->dev = devm_kzalloc(dev, sizeof(*item->data->dev) *
++					 data->count, GFP_KERNEL);
++		if (!data->dev)
++			return -ENOMEM;
++
++		hpdev = data->dev;
++
++		if (!count) {
++			/* One hotplug device is defined for trigger. */
++			err = mlxcpld_bw_set_hotplug_dev(child, hpdev);
++			if (err)
++				return err;
++		} else {
++			/* Multiple hotplug devices are defined for trigger. */
++			for_each_child_of_node(child, grandchild) {
++				err = mlxcpld_bw_set_hotplug_dev(grandchild,
++								   hpdev);
++				if (err)
++					return err;
++
++				hpdev++;
++			}
++		}
++
++		data++;
++	}
++
++	return 0;
++}
++
++static struct mlxcpld_bw_attr_group mlxcpld_bw_attr_groups[] = {
++	{ "ps0", MLXCPLD_BW_ATTR_PS0, 1, true,
++	  mlxcpld_bw_of_hotplug_parser },
++	{ "ps1", MLXCPLD_BW_ATTR_PS1, 1, true,
++	  mlxcpld_bw_of_hotplug_parser },
++	{ "ps2", MLXCPLD_BW_ATTR_PS2, 1, true,
++	  mlxcpld_bw_of_hotplug_parser },
++	{ "temp", MLXCPLD_BW_ATTR_TEMP, 1, true,
++	  mlxcpld_bw_of_hotplug_parser },
++	{ "reset", MLXCPLD_BW_ATTR_RST, 0, false,
++	  mlxcpld_bw_of_simple_parser },
++	{ "mux", MLXCPLD_BW_ATTR_MUX, 0, false,
++	  mlxcpld_bw_of_simple_parser },
++	{ "clk", MLXCPLD_BW_ATTR_CLK, 1, true,
++	  mlxcpld_bw_of_hotplug_parser },
++	{ "gprw", MLXCPLD_BW_ATTR_GPRW, 0, false,
++	  mlxcpld_bw_of_simple_parser },
++	{ "gpro", MLXCPLD_BW_ATTR_GPRO, 1, false,
++	  mlxcpld_bw_of_simple_parser },
++};
++
++static int
++mlxcpld_bw_of_item_parser(struct device_node *np, struct device *dev,
++			    struct mlxcpld_bw_item *item,
++			    mlxcpld_bw_parse_np fpars)
++{
++	item->count = of_get_child_count(np);
++	item->data = devm_kzalloc(dev, sizeof(*item->data) * item->count,
++				  GFP_KERNEL);
++	if (!item->data)
++		return -ENOMEM;
++
++	return fpars(np, dev, item);
++}
++
++static int mlxcpld_bw_device_create(struct device *dev,
++				      struct mlxcpld_hotplug_device *item)
++{
++	item->adapter = i2c_get_adapter(item->bus);
++	if (!item->adapter) {
++		dev_err(dev, "Failed to get adapter for bus %d\n",
++			item->bus);
++		return -EFAULT;
++	}
++
++	item->client = i2c_new_device(item->adapter, &item->brdinfo);
++	if (!item->client) {
++		dev_err(dev, "Failed to create client %s at bus %d at addr 0x%02x\n",
++			item->brdinfo.type, item->bus, item->brdinfo.addr);
++		i2c_put_adapter(item->adapter);
++		item->adapter = NULL;
++		return -EFAULT;
++	}
++
++	return 0;
++}
++
++static void mlxcpld_bw_device_destroy(struct mlxcpld_hotplug_device *item)
++{
++	if (item->client) {
++		i2c_unregister_device(item->client);
++		item->client = NULL;
++	}
++
++	if (item->adapter) {
++		i2c_put_adapter(item->adapter);
++		item->adapter = NULL;
++	}
++}
++
++#define ATTR_TYPE(i)	mlxcpld_bw_attr_groups[i].type
++#define ATTR_GRP(i)	priv->item[ATTR_TYPE(i)]
++#define ATTR_DATA(i)	ATTR_GRP(i)->data
++#define GRP_REG(i)	ATTR_GRP(ATTR_TYPE(i))->reg
++#define GRP_COUNT(i)	ATTR_GRP(ATTR_TYPE(i))->count
++#define GRP_IND(i)	ATTR_GRP(ATTR_TYPE(i))->ind
++
++static ssize_t mlxcpld_bw_attr_show(struct device *dev,
++				      struct device_attribute *attr,
++				      char *buf)
++{
++	struct mlxcpld_bw_priv_data *priv =
++					i2c_get_clientdata(to_i2c_client(dev));
++	int index = to_sensor_dev_attr_2(attr)->index;
++	int nr = to_sensor_dev_attr_2(attr)->nr;
++	struct mlxcpld_bw_data *data;
++	u32 regval = 0;
++	int ret;
++
++	switch (nr) {
++	case MLXCPLD_BW_ATTR_TEMP:
++	case MLXCPLD_BW_ATTR_PS0:
++	case MLXCPLD_BW_ATTR_PS1:
++	case MLXCPLD_BW_ATTR_PS2:
++	case MLXCPLD_BW_ATTR_CLK:
++	case MLXCPLD_BW_ATTR_MUX:
++	case MLXCPLD_BW_ATTR_RST:
++		data = ATTR_DATA(ATTR_TYPE(nr)) + ((index - GRP_IND(nr)) %
++				 GRP_COUNT(nr));
++		ret = regmap_read(priv->regmap, data->reg, &regval);
++		if (ret)
++			goto access_error;
++
++		regval = !!(regval & ~data->mask);
++
++		break;
++
++	case MLXCPLD_BW_ATTR_GPRW:
++	case MLXCPLD_BW_ATTR_GPRO:
++		data = ATTR_DATA(ATTR_TYPE(nr)) + ((index - GRP_IND(nr)) %
++				 GRP_COUNT(nr));
++		ret = regmap_read(priv->regmap, data->reg, &regval);
++		if (ret)
++			goto access_error;
++
++		break;
++
++	default:
++		break;
++
++	}
++
++	return sprintf(buf, "%u\n", regval);
++
++access_error:
++	return ret;
++}
++
++static int
++mlxcpld_bw_store(struct mlxcpld_bw_priv_data *priv,
++		   struct mlxcpld_bw_data *data, const char *buf, u32 *val)
++{
++	u32 regval;
++	int ret;
++
++	ret = kstrtou32(buf, MLXCPLD_BW_ATTR_VALUE_SIZE, val);
++	if (ret)
++		return ret;
++
++	ret = regmap_read(priv->regmap, data->reg, &regval);
++	if (ret)
++		goto access_error;
++
++	regval &= data->mask;
++
++	*val = !!(*val);
++	if (*val)
++		regval |= ~data->mask;
++	else
++		regval &= data->mask;
++
++	ret = regmap_write(priv->regmap, data->reg, regval);
++	if (ret < 0)
++		goto access_error;
++
++	return 0;
++
++access_error:
++	dev_err(&priv->client->dev, "I2C access error\n");
++	return ret;
++}
++
++static ssize_t mlxcpld_bw_attr_store(struct device *dev,
++				       struct device_attribute *attr,
++				       const char *buf, size_t len)
++{
++	struct mlxcpld_bw_priv_data *priv =
++					i2c_get_clientdata(to_i2c_client(dev));
++	int index = to_sensor_dev_attr_2(attr)->index;
++	int nr = to_sensor_dev_attr_2(attr)->nr;
++	struct mlxcpld_bw_data *data;
++	u32 regval;
++	int ret;
++
++	switch (nr) {
++	case MLXCPLD_BW_ATTR_PS0:
++	case MLXCPLD_BW_ATTR_PS1:
++	case MLXCPLD_BW_ATTR_PS2:
++	case MLXCPLD_BW_ATTR_TEMP:
++	case MLXCPLD_BW_ATTR_CLK:
++	case MLXCPLD_BW_ATTR_GPRO:
++		/* Read-only Status registers */
++		break;
++
++	case MLXCPLD_BW_ATTR_MUX:
++		data = ATTR_DATA(ATTR_TYPE(nr)) + ((index - GRP_IND(nr)) %
++				 GRP_COUNT(nr));
++
++		ret = mlxcpld_bw_store(priv, data, buf, &regval);
++		if (ret)
++			goto access_error;
++
++		/*
++		 * Mux can open and close an access to some devices, which by
++		 * default are un-accessible.
++		 * Create dynamic device, in case it is associated with mux
++		 * attribute. Typical example of such device is SPI flash
++		 * device, which generally is not used by local CPU. For
++		 * example, in case a local CPU is located on Base Management
++		 * Controller board and capable of access to some devices, like
++		 * BIOS or NC-SI flash for some sort of out of service
++		 * maintenance.
++		 * Enabling more than one dynamic device at the mux is not
++		 * allowed.
++		 */
++		if (regval && data->np && priv->en_dynamic_node)
++			break;
++
++		if (data->np) {
++			if (regval) {
++				/* Enable and create platform device. */
++				of_update_property(data->np, &device_en);
++
++				data->pdev = of_platform_device_create(
++							data->np, NULL, NULL);
++				priv->en_dynamic_node = true;
++			} else {
++				if (!data->pdev)
++					break;
++
++				/* Disable and unregister platform device. */
++				of_update_property(data->np, &device_dis);
++				of_device_unregister(data->pdev);
++				of_node_clear_flag(data->np, OF_POPULATED);
++				data->pdev = NULL;
++				priv->en_dynamic_node = false;
++			}
++		}
++
++		break;
++
++	case MLXCPLD_BW_ATTR_RST:
++		data = ATTR_DATA(ATTR_TYPE(nr)) + ((index - GRP_IND(nr)) %
++				 GRP_COUNT(nr));
++		ret = mlxcpld_bw_store(priv, data, buf, &regval);
++		if (ret)
++			goto access_error;
++
++		break;
++
++	case MLXCPLD_BW_ATTR_GPRW:
++		ret = kstrtou32(buf, MLXCPLD_BW_ATTR_VALUE_SIZE, &regval);
++		if (ret)
++			return ret;
++
++		data = ATTR_DATA(ATTR_TYPE(nr)) + ((index - GRP_IND(nr)) %
++				 GRP_COUNT(nr));
++		ret = regmap_write(priv->regmap, data->reg, regval);
++		if (ret)
++			goto access_error;
++
++		break;
++
++	default:
++		break;
++	}
++
++	return len;
++
++access_error:
++	dev_err(&priv->client->dev, "Failed to store attribute\n");
++
++	return ret;
++}
++
++#define PRIV_ATTR(i) priv->mlxcpld_bw_attr[i]
++#define PRIV_DEV_ATTR(i) priv->mlxcpld_bw_dev_attr[i]
++
++static int
++mlxcpld_bw_add_attr_group(struct mlxcpld_bw_priv_data *priv,
++			    struct mlxcpld_bw_attr_group *grp,
++			    int id)
++{
++	struct mlxcpld_bw_data *data = priv->item[grp->type]->data;
++	int i;
++
++	/* Skip group with negative access value. */
++	if (grp->access < 0)
++		return id;
++
++	priv->item[grp->type]->ind = id;
++	for (i = 0; i < priv->item[grp->type]->count; i++, id++, data++) {
++		PRIV_ATTR(id) = &PRIV_DEV_ATTR(id).dev_attr.attr;
++		if (grp->use_grp_name)
++			PRIV_ATTR(id)->name =
++				devm_kasprintf(&priv->client->dev, GFP_KERNEL,
++					       "%s%u", grp->name, id %
++						priv->item[grp->type]->count
++						+ 1);
++		else
++			PRIV_ATTR(id)->name =
++				devm_kasprintf(&priv->client->dev, GFP_KERNEL,
++					       data->label);
++
++		PRIV_DEV_ATTR(id).nr = grp->type;
++
++		switch (grp->access) {
++		case 0:
++			PRIV_DEV_ATTR(id).dev_attr.attr.mode = 0644;
++			PRIV_DEV_ATTR(id).dev_attr.show =
++						mlxcpld_bw_attr_show;
++			PRIV_DEV_ATTR(id).dev_attr.store =
++						mlxcpld_bw_attr_store;
++			break;
++
++		case 1:
++			PRIV_DEV_ATTR(id).dev_attr.attr.mode = 0444;
++			PRIV_DEV_ATTR(id).dev_attr.show =
++						mlxcpld_bw_attr_show;
++
++			break;
++
++		case 2:
++			PRIV_DEV_ATTR(id).dev_attr.attr.mode = 0200;
++			PRIV_DEV_ATTR(id).dev_attr.store =
++						mlxcpld_bw_attr_store;
++
++			break;
++
++		default:
++
++			break;
++		}
++
++		if (!PRIV_ATTR(id)->name) {
++			dev_err(&priv->client->dev, "Memory allocation failed for sysfs attribute %d.\n",
++				id + 1);
++			return -ENOMEM;
++		}
++
++		PRIV_DEV_ATTR(id).dev_attr.attr.name =
++						PRIV_ATTR(id)->name;
++		PRIV_DEV_ATTR(id).index = id;
++		sysfs_attr_init(&PRIV_DEV_ATTR(id).dev_attr.attr);
++	}
++
++	return id;
++}
++
++static int mlxcpld_bw_attr_init(struct mlxcpld_bw_priv_data *priv)
++{
++	int i, num_attrs = 0;
++	int ret = 0;
++
++	for (i = 0; i < ARRAY_SIZE(mlxcpld_bw_attr_groups); i++) {
++		if (mlxcpld_bw_attr_groups[i].access >= 0)
++			num_attrs += ATTR_GRP(i)->count;
++	}
++
++	priv->group.attrs = devm_kzalloc(&priv->client->dev, num_attrs *
++					 sizeof(struct attribute *),
++					 GFP_KERNEL);
++	if (!priv->group.attrs)
++		return -ENOMEM;
++
++	for (i = 0; i < ARRAY_SIZE(mlxcpld_bw_attr_groups); i++) {
++		ret = mlxcpld_bw_add_attr_group(priv,
++						  &mlxcpld_bw_attr_groups[i],
++						  ret);
++
++		if (ret < 0)
++			return ret;
++	}
++
++	priv->group.attrs = priv->mlxcpld_bw_attr;
++	priv->groups[0] = &priv->group;
++	priv->groups[1] = NULL;
++
++	return 0;
++}
++
++static void
++mlxcpld_bw_work_helper(struct mlxcpld_bw_priv_data *priv,
++			 struct mlxcpld_bw_item *item, u8 is_inverse,
++			 u16 off, u32 mask, u32 *cache)
++{
++	struct device *dev = &priv->client->dev;
++	struct mlxcpld_hotplug_device *hpdev;
++	struct mlxcpld_bw_data *data;
++	u32 asserted, regval, bit;
++	int i, ret;
++
++	/*
++	 * Validate if item related to received signal type is valid.
++	 * It should never happen, excepted the situation when some
++	 * piece of hardware is broken. In such situation just produce
++	 * error message and return. Caller must continue to handle the
++	 * signals from other devices if any.
++	 */
++	if (unlikely(!item)) {
++		dev_err(dev, "False signal is received: register at offset 0x%02x, mask 0x%02x.\n",
++			off, mask);
++
++		return;
++	}
++
++	/* Mask event. */
++	ret = regmap_write(priv->regmap, off + MLXCPLD_BW_MASK_OFF, 0);
++	if (ret)
++		goto access_error;
++
++	/* Read status. */
++	ret = regmap_read(priv->regmap, off, &regval);
++	if (ret)
++		goto access_error;
++
++	/* Set asserted bits and save last status. */
++	regval &= mask;
++	asserted = *cache ^ regval;
++	*cache = regval;
++
++	for_each_set_bit(bit, (unsigned long *)&asserted, 8) {
++		data = item->data + bit;
++		hpdev = data->dev;
++		for (i = 0; i < data->count; i++, hpdev++) {
++			if (regval & BIT(bit)) {
++				if (is_inverse)
++					mlxcpld_bw_device_destroy(hpdev);
++				else
++					mlxcpld_bw_device_create(dev, hpdev);
++			} else {
++				if (is_inverse)
++					mlxcpld_bw_device_create(dev, hpdev);
++				else
++					mlxcpld_bw_device_destroy(hpdev);
++			}
++		}
++	}
++
++	/* Acknowledge event. */
++	ret = regmap_write(priv->regmap, off + MLXCPLD_BW_EVENT_OFF, 0);
++	if (ret)
++		goto access_error;
++
++	/* Unmask event. */
++	ret = regmap_write(priv->regmap, off + MLXCPLD_BW_MASK_OFF, mask);
++	if (ret)
++		goto access_error;
++
++	return;
++
++access_error:
++	dev_err(dev, "Failed to complete workqueue.\n");
++}
++
++/*
++ * mlxcpld_bw_work_handler - performs traversing of CPLD interrupt
++ * registers according to the below hierarchy schema:
++ *
++ *				Aggregation registers (status/mask)
++ * PS0 registers:		*---*
++ * *-----------------*		|   |
++ * |status/event/mask|----->    | * |
++ * *-----------------*		|   |
++ * PS1 registers:		|   |
++ * *-----------------*		|   |
++ * |status/event/mask|----->    | * |
++ * *-----------------*		|   |
++ * PS2 registers:               |   |
++ * *-----------------*          |   |
++ * |status/event/mask|----->    | * |
++ * *-----------------*          |   |
++ * Temp registers:		|   |--> CPU
++ * *-----------------*		|   |
++ * |status/event/mask|----->    | * |
++ * *-----------------*		    |
++ * CLK registers:               |   |
++ * *-----------------*          |   |
++ * |status/event/mask|----->    | * |
++ * *-----------------*          |   |
++ *
++ * In case some system changes are detected: PS good/bad,
++ * temp normal/critical, relevant device is created
++ * or destroyed.
++ */
++static void mlxcpld_bw_work_handler(struct work_struct *work)
++{
++	struct mlxcpld_bw_priv_data *priv = container_of(work,
++			struct mlxcpld_bw_priv_data, dwork_irq.work);
++	u8 aggr_asserted;
++	unsigned long flags;
++	u32 regval;
++	int i, ret;
++
++	/* Mask aggregation event. */
++	ret = regmap_write(priv->regmap, priv->top_aggr_offset +
++			   MLXCPLD_BW_AGGR_MASK_OFF, 0);
++	if (ret < 0)
++		goto access_error;
++
++	/* Read aggregation status. */
++	ret = regmap_read(priv->regmap, priv->top_aggr_offset, &regval);
++	if (ret)
++		goto access_error;
++
++	regval &= priv->top_aggr_mask;
++	aggr_asserted = priv->aggr_cache ^ regval;
++	priv->aggr_cache = regval;
++
++	/* Handle topology and health configuration changes. */
++	for (i = 0; i < ARRAY_SIZE(mlxcpld_bw_attr_groups); i++) {
++		switch (ATTR_TYPE(i)) {
++		case MLXCPLD_BW_ATTR_TEMP:
++		case MLXCPLD_BW_ATTR_PS0:
++		case MLXCPLD_BW_ATTR_PS1:
++		case MLXCPLD_BW_ATTR_PS2:
++		case MLXCPLD_BW_ATTR_CLK:
++			if (aggr_asserted & ATTR_GRP(i)->aggr_mask)
++				mlxcpld_bw_work_helper(priv, ATTR_GRP(i), 0,
++							 GRP_REG(i),
++							 ATTR_GRP(i)->mask,
++							 &ATTR_GRP(i)->cache);
++
++			break;
++
++		default:
++			break;
++		}
++	}
++
++	if (aggr_asserted) {
++		spin_lock_irqsave(&priv->lock, flags);
++
++		/*
++		 * It is possible, that some signals have been inserted, while
++		 * interrupt has been masked by mlxcpld_bw_work_handler.
++		 * In this case such signals will be missed. In order to handle
++		 * these signals delayed work is canceled and work task
++		 * re-scheduled for immediate execution. It allows to handle
++		 * missed signals, if any. In other case work handler just
++		 * validates that no new signals have been received during
++		 * masking.
++		 */
++		cancel_delayed_work(&priv->dwork_irq);
++		schedule_delayed_work(&priv->dwork_irq, 0);
++
++		spin_unlock_irqrestore(&priv->lock, flags);
++
++		return;
++	}
++
++	/* Unmask aggregation event (no need acknowledge). */
++	ret = regmap_write(priv->regmap, priv->top_aggr_offset +
++			   MLXCPLD_BW_AGGR_MASK_OFF, priv->top_aggr_mask);
++	if (ret)
++		goto access_error;
++
++	return;
++
++access_error:
++	dev_err(&priv->client->dev, "Failed to complete workqueue.\n");
++}
++
++static int mlxcpld_bw_set_irq(struct mlxcpld_bw_priv_data *priv)
++{
++	int i, ret;
++
++	for (i = 0; i < ARRAY_SIZE(mlxcpld_bw_attr_groups); i++) {
++		if (!ATTR_DATA(i))
++			continue;
++
++		switch (ATTR_TYPE(i)) {
++		case MLXCPLD_BW_ATTR_TEMP:
++		case MLXCPLD_BW_ATTR_PS0:
++		case MLXCPLD_BW_ATTR_PS1:
++		case MLXCPLD_BW_ATTR_PS2:
++		case MLXCPLD_BW_ATTR_CLK:
++			/* Clear group presense event. */
++			ret = regmap_write(priv->regmap, GRP_REG(i) +
++					   MLXCPLD_BW_EVENT_OFF, 0);
++			if (ret)
++				goto access_error;
++
++			/* Keep group initial status as zero and unmask
++			 * group event.
++			 */
++			ret = regmap_write(priv->regmap, GRP_REG(i) +
++					   MLXCPLD_BW_MASK_OFF,
++					   ATTR_GRP(i)->mask);
++
++			if (ret)
++				goto access_error;
++
++			break;
++
++		default:
++			/* Clear group presense event. */
++			ret = regmap_write(priv->regmap, GRP_REG(i) +
++					   MLXCPLD_BW_EVENT_OFF, 0);
++			if (ret)
++				goto access_error;
++
++			/* Set group initial status as mask and unmask
++			 * group event.
++			 */
++			ATTR_GRP(i)->cache = ATTR_GRP(i)->mask;
++			ret = regmap_write(priv->regmap, GRP_REG(i) +
++					   MLXCPLD_BW_MASK_OFF,
++					   ATTR_GRP(i)->mask);
++			if (ret)
++				goto access_error;
++
++			break;
++
++		}
++	}
++
++	/* Keep aggregation initial status as zero and unmask events. */
++	ret = regmap_write(priv->regmap, priv->top_aggr_offset +
++			   MLXCPLD_BW_AGGR_MASK_OFF, priv->top_aggr_mask);
++	if (ret)
++		goto access_error;
++
++	/* Invoke work handler for initializing hot plug devices setting. */
++	mlxcpld_bw_work_handler(&priv->dwork_irq.work);
++
++	enable_irq(priv->irq);
++
++	return 0;
++
++access_error:
++	dev_err(&priv->client->dev, "Failed to set interrupts.\n");
++
++	enable_irq(priv->irq);
++
++	return ret;
++}
++
++static void mlxcpld_bw_unset_irq(struct mlxcpld_bw_priv_data *priv)
++{
++	struct mlxcpld_bw_data *data;
++	int i, j;
++
++	disable_irq(priv->irq);
++	cancel_delayed_work_sync(&priv->dwork_irq);
++
++	/* Mask aggregation event. */
++	regmap_write(priv->regmap, priv->top_aggr_offset +
++		     MLXCPLD_BW_AGGR_MASK_OFF, 0);
++
++	/* Clear topology configurations. */
++	for (i = 0; i < ARRAY_SIZE(mlxcpld_bw_attr_groups); i++) {
++		switch (ATTR_TYPE(i)) {
++		case MLXCPLD_BW_ATTR_PS0:
++		case MLXCPLD_BW_ATTR_PS1:
++		case MLXCPLD_BW_ATTR_PS2:
++		case MLXCPLD_BW_ATTR_TEMP:
++		case MLXCPLD_BW_ATTR_CLK:
++			if (!ATTR_DATA(i))
++				break;
++
++			/* Mask group presense event. */
++			regmap_write(priv->regmap, GRP_REG(i) +
++				     MLXCPLD_BW_MASK_OFF, 0);
++			/* Clear group presense event. */
++			regmap_write(priv->regmap, GRP_REG(i) +
++				     MLXCPLD_BW_EVENT_OFF, 0);
++
++			/* Remove all the attached devices in group. */
++			data = ATTR_DATA(i);
++			for (j = 0; j < ATTR_GRP(i)->count; j++, data++)
++				mlxcpld_bw_device_destroy(data->dev);
++
++			break;
++
++		default:
++
++			break;
++		}
++	}
++}
++
++static irqreturn_t mlxcpld_bw_irq_handler(int irq, void *dev)
++{
++	struct mlxcpld_bw_priv_data *priv =
++				(struct mlxcpld_bw_priv_data *)dev;
++
++	/* Schedule work task for immediate execution.*/
++	schedule_delayed_work(&priv->dwork_irq, 0);
++
++	return IRQ_HANDLED;
++}
++
++static int
++mlxcpld_bw_probe(struct i2c_client *client,
++		   const struct i2c_device_id *id)
++{
++	struct device_node *child, *np = client->dev.of_node;
++	struct mlxcpld_bw_priv_data *priv;
++	struct i2c_adapter *adapter;
++	u32 val;
++	int i;
++	int err;
++
++	if (!np)
++		return -ENODEV;
++
++	if (!of_device_is_compatible(np, "mellanox,mlxcpld-bw"))
++		return -ENODEV;
++
++	child = of_parse_phandle(np, "i2c-deferred", 0);
++	if (child) {
++		adapter = of_find_i2c_adapter_by_node(child);
++		of_node_put(child);
++		if (!adapter)
++			return -EPROBE_DEFER;
++	}
++
++/* FIXME: Doing this causes a kernel panic on the EVB. Commenting out for now.
++	priv->cpld_on = devm_gpiod_get(priv->hwmon, "cpld_on", GPIOD_IN);
++	if (IS_ERR(priv->cpld_on))
++		return PTR_ERR(priv->cpld_on);
++	if (gpiod_get_value(priv->cpld_on))
++		return -EPROBE_DEFER;
++*/
++	if (!i2c_check_functionality(client->adapter,
++				     I2C_FUNC_SMBUS_BYTE_DATA))
++		return -ENODEV;
++
++	priv = devm_kzalloc(&client->dev, sizeof(*priv), GFP_KERNEL);
++	if (!priv)
++		return -ENOMEM;
++
++	for (i = 0; i < MLXCPLD_BW_ATTR_GROUP_NUM; i++) {
++		priv->item[i] = devm_kzalloc(&client->dev,
++					     sizeof(*priv->item[i]),
++					     GFP_KERNEL);
++		if (!priv->item[i])
++			return -ENOMEM;
++	}
++
++	priv->regmap = devm_regmap_init_i2c(client, &mlxcpld_bw_regmap_conf);
++	if (IS_ERR(priv->regmap))
++		return PTR_ERR(priv->regmap);
++
++	priv->client = client;
++
++	if (!of_property_read_u32(np, "top_aggr_offset", &val))
++		priv->top_aggr_offset = val;
++
++	if (!of_property_read_u32(np, "top_aggr_mask", &val))
++		priv->top_aggr_mask = val;
++
++	if (!of_property_read_u32(np, "top_aggr_irq", &priv->irq_gpio)) {
++		gpio_request(priv->irq_gpio, "top_aggr_irq");
++		gpio_export(priv->irq_gpio, true);
++		gpio_direction_input(priv->irq_gpio);
++		priv->irq = gpio_to_irq(priv->irq_gpio);
++		err = devm_request_irq(&client->dev, priv->irq,
++				       mlxcpld_bw_irq_handler,
++				       IRQF_TRIGGER_FALLING | IRQF_SHARED,
++				       np->name, priv);
++
++		if (err) {
++			dev_err(&client->dev, "Failed to request irq: %d\n",
++				err);
++			return err;
++		}
++
++		disable_irq(priv->irq);
++		priv->set_handler = true;
++	}
++
++	/* Parse device tree table and configure driver's attributes. */
++	for_each_child_of_node(np, child) {
++		for (i = 0; i < ARRAY_SIZE(mlxcpld_bw_attr_groups); i++) {
++			if (!of_node_cmp(child->name,
++					 mlxcpld_bw_attr_groups[i].name)) {
++				err = mlxcpld_bw_of_item_parser(child,
++								  &client->dev,
++								  ATTR_GRP(i),
++					mlxcpld_bw_attr_groups[i].fpars);
++				goto parse_check;
++			}
++		}
++
++parse_check:
++		if (err)
++			return err;
++	}
++
++	i2c_set_clientdata(client, priv);
++	spin_lock_init(&priv->lock);
++	mutex_init(&priv->access_lock);
++	err = mlxcpld_bw_attr_init(priv);
++	if (err) {
++		dev_err(&client->dev, "Failed to allocate attributes: %d\n",
++			err);
++		return err;
++	}
++
++	priv->hwmon = devm_hwmon_device_register_with_groups(&client->dev,
++					"mlxcpld_bw", priv, priv->groups);
++	if (IS_ERR(priv->hwmon)) {
++		dev_err(&client->dev, "Failed to register hwmon device %ld\n",
++			PTR_ERR(priv->hwmon));
++		return PTR_ERR(priv->hwmon);
++	}
++
++	if (priv->set_handler) {
++		INIT_DELAYED_WORK(&priv->dwork_irq, mlxcpld_bw_work_handler);
++		/* Perform initial interrupts setup. */
++		mlxcpld_bw_set_irq(priv);
++	}
++
++	priv->after_probe = true;
++
++	return 0;
++}
++
++static int mlxcpld_bw_remove(struct i2c_client *client)
++{
++	struct mlxcpld_bw_priv_data *priv = i2c_get_clientdata(client);
++
++	/* Clean interrupts setup. */
++	if (priv->set_handler)
++		mlxcpld_bw_unset_irq(priv);
++
++	mutex_destroy(&priv->access_lock);
++
++	return 0;
++}
++
++static const struct i2c_device_id mlxcpld_bw_id[] = {
++	{ "mlxcpld-bw", MLXCPLD_BW },
++	{ },
++};
++MODULE_DEVICE_TABLE(i2c, mlxcpld_bw_id);
++
++static const struct of_device_id mlxcpld_bw_dt_match[] = {
++	{ .compatible = "mellanox,mlxcpld-bw" },
++	{ },
++};
++MODULE_DEVICE_TABLE(of, mlxcpld_bw_dt_match);
++
++static struct i2c_driver mlxcpld_bw_driver = {
++	.class = I2C_CLASS_HWMON,
++	.driver = {
++	    .name = "mlxcpld-bw",
++	    .of_match_table = of_match_ptr(mlxcpld_bw_dt_match),
++	},
++	.probe = mlxcpld_bw_probe,
++	.remove = mlxcpld_bw_remove,
++	.id_table = mlxcpld_bw_id,
++};
++
++module_i2c_driver(mlxcpld_bw_driver);
++
++MODULE_DESCRIPTION("Mellanox CPLD BlueWhale I2C driver");
++MODULE_LICENSE("Dual BSD/GPL");
++MODULE_ALIAS("mlxcpld-bw");
+diff --git a/include/linux/platform_data/mlxcpld-hotplug.h b/include/linux/platform_data/mlxcpld-hotplug.h
+new file mode 100644
+index 000000000000..e4cfcffaa6f4
+--- /dev/null
++++ b/include/linux/platform_data/mlxcpld-hotplug.h
+@@ -0,0 +1,99 @@
++/*
++ * include/linux/platform_data/mlxcpld-hotplug.h
++ * Copyright (c) 2016 Mellanox Technologies. All rights reserved.
++ * Copyright (c) 2016 Vadim Pasternak <vadimp@mellanox.com>
++ *
++ * Redistribution and use in source and binary forms, with or without
++ * modification, are permitted provided that the following conditions are met:
++ *
++ * 1. Redistributions of source code must retain the above copyright
++ *    notice, this list of conditions and the following disclaimer.
++ * 2. Redistributions in binary form must reproduce the above copyright
++ *    notice, this list of conditions and the following disclaimer in the
++ *    documentation and/or other materials provided with the distribution.
++ * 3. Neither the names of the copyright holders nor the names of its
++ *    contributors may be used to endorse or promote products derived from
++ *    this software without specific prior written permission.
++ *
++ * Alternatively, this software may be distributed under the terms of the
++ * GNU General Public License ("GPL") version 2 as published by the Free
++ * Software Foundation.
++ *
++ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
++ * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
++ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
++ * ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE
++ * LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
++ * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
++ * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
++ * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
++ * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
++ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
++ * POSSIBILITY OF SUCH DAMAGE.
++ */
++
++#ifndef __LINUX_PLATFORM_DATA_MLXCPLD_HOTPLUG_H
++#define __LINUX_PLATFORM_DATA_MLXCPLD_HOTPLUG_H
++
++/**
++ * struct mlxcpld_hotplug_device - I2C device data:
++ * @adapter: I2C device adapter;
++ * @client: I2C device client;
++ * @brdinfo: device board information;
++ * @bus: I2C bus, where device is attached;
++ *
++ * Structure represents I2C hotplug device static data (board topology) and
++ * dynamic data (related kernel objects handles).
++ */
++struct mlxcpld_hotplug_device {
++	struct i2c_adapter *adapter;
++	struct i2c_client *client;
++	struct i2c_board_info brdinfo;
++	u16 bus;
++};
++
++/**
++ * struct mlxcpld_hotplug_platform_data - device platform data:
++ * @top_aggr_offset: offset of top aggregation interrupt register;
++ * @top_aggr_mask: top aggregation interrupt common mask;
++ * @top_aggr_psu_mask: top aggregation interrupt PSU mask;
++ * @psu_reg_offset: offset of PSU interrupt register;
++ * @psu_mask: PSU interrupt mask;
++ * @psu_count: number of equipped replaceable PSUs;
++ * @psu: pointer to PSU devices data array;
++ * @top_aggr_pwr_mask: top aggregation interrupt power mask;
++ * @pwr_reg_offset: offset of power interrupt register
++ * @pwr_mask: power interrupt mask;
++ * @pwr_count: number of power sources;
++ * @pwr: pointer to power devices data array;
++ * @top_aggr_fan_mask: top aggregation interrupt FAN mask;
++ * @fan_reg_offset: offset of FAN interrupt register;
++ * @fan_mask: FAN interrupt mask;
++ * @fan_count: number of equipped replaceable FANs;
++ * @fan: pointer to FAN devices data array;
++ *
++ * Structure represents board platform data, related to system hotplug events,
++ * like FAN, PSU, power cable insertion and removing. This data provides the
++ * number of hot-pluggable devices and hardware description for event handling.
++ */
++struct mlxcpld_hotplug_platform_data {
++	u16 top_aggr_offset;
++	u8 top_aggr_mask;
++	u8 top_aggr_psu_mask;
++	u16 psu_reg_offset;
++	u8 psu_mask;
++	u8 psu_count;
++	struct mlxcpld_hotplug_device *psu;
++	u8 top_aggr_pwr_mask;
++	u16 pwr_reg_offset;
++	u8 pwr_mask;
++	u8 pwr_count;
++	struct mlxcpld_hotplug_device *pwr;
++	u8 top_aggr_fan_mask;
++	u16 fan_reg_offset;
++	u8 fan_mask;
++	u8 fan_count;
++	struct mlxcpld_hotplug_device *fan;
++};
++
++#endif /* __LINUX_PLATFORM_DATA_MLXCPLD_HOTPLUG_H */
+-- 
+2.25.1
+

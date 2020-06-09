@@ -1,0 +1,3108 @@
+From 0468a2510c8621ed6408106741f44cd70c0d22ef Mon Sep 17 00:00:00 2001
+From: Joseph Liu <kwliu@nuvoton.com>
+Date: Mon, 8 Jun 2020 17:07:32 +0800
+Subject: [PATCH] bw openipmi
+
+---
+ INSTALL                                   | 384 ++++++++----
+ cmdlang/Makefile.am                       |   3 +-
+ configure.ac                              |  10 +
+ lanserv/Makefile.am                       |  28 +-
+ lanserv/OpenIPMI/Makefile.am              |   2 +-
+ lanserv/OpenIPMI/ipmbserv.h               |  83 +++
+ lanserv/OpenIPMI/serv.h                   |   4 +
+ lanserv/README.design                     |   6 +-
+ lanserv/bmc.c                             |   4 +
+ lanserv/bmc_app.c                         |   8 +-
+ lanserv/config.c                          |   3 +
+ lanserv/ipmb_ipmi.c                       | 219 +++++++
+ lanserv/ipmi_sim.c                        | 137 +++-
+ lanserv/lan.conf                          |  13 +
+ lanserv/mlxbw/71-mlxbw-events.rules       |  15 +
+ lanserv/mlxbw/71-mlxbw-hwmon-events.rules |  20 +
+ lanserv/mlxbw/Makefile.am                 |  29 +
+ lanserv/mlxbw/lancontrol                  | 295 +++++++++
+ lanserv/mlxbw/mlxbw-hw-events.sh          |  56 ++
+ lanserv/mlxbw/mlxbw.c                     | 729 ++++++++++++++++++++++
+ lanserv/mlxbw/mlxbw.hw                    |  76 +++
+ lanserv/mlxbw/mlxbw.lan.conf              |  81 +++
+ lanserv/mlxbw/mlxbw.sdr                   | 305 +++++++++
+ lanserv/mlxbw/sdr.20.main                 |   7 +
+ lanserv/mlxbw/sel_set_log_size.sh         |  21 +
+ sample/ipmi_serial_bmc_emu.c              |   2 +-
+ tcl/Makefile.am                           |   2 +-
+ unix/Makefile.am                          |  18 +-
+ 28 files changed, 2404 insertions(+), 156 deletions(-)
+ create mode 100644 lanserv/OpenIPMI/ipmbserv.h
+ create mode 100644 lanserv/ipmb_ipmi.c
+ create mode 100644 lanserv/mlxbw/71-mlxbw-events.rules
+ create mode 100644 lanserv/mlxbw/71-mlxbw-hwmon-events.rules
+ create mode 100644 lanserv/mlxbw/Makefile.am
+ create mode 100644 lanserv/mlxbw/lancontrol
+ create mode 100644 lanserv/mlxbw/mlxbw-hw-events.sh
+ create mode 100644 lanserv/mlxbw/mlxbw.c
+ create mode 100644 lanserv/mlxbw/mlxbw.hw
+ create mode 100644 lanserv/mlxbw/mlxbw.lan.conf
+ create mode 100644 lanserv/mlxbw/mlxbw.sdr
+ create mode 100644 lanserv/mlxbw/sdr.20.main
+ create mode 100644 lanserv/mlxbw/sel_set_log_size.sh
+
+diff --git a/INSTALL b/INSTALL
+index 23e5f25d..8865734f 100644
+--- a/INSTALL
++++ b/INSTALL
+@@ -1,236 +1,368 @@
+ Installation Instructions
+ *************************
+ 
+-Copyright (C) 1994, 1995, 1996, 1999, 2000, 2001, 2002, 2004, 2005 Free
+-Software Foundation, Inc.
++   Copyright (C) 1994-1996, 1999-2002, 2004-2016 Free Software
++Foundation, Inc.
+ 
+-This file is free documentation; the Free Software Foundation gives
+-unlimited permission to copy, distribute and modify it.
++   Copying and distribution of this file, with or without modification,
++are permitted in any medium without royalty provided the copyright
++notice and this notice are preserved.  This file is offered as-is,
++without warranty of any kind.
+ 
+ Basic Installation
+ ==================
+ 
+-These are generic installation instructions.
++   Briefly, the shell command './configure && make && make install'
++should configure, build, and install this package.  The following
++more-detailed instructions are generic; see the 'README' file for
++instructions specific to this package.  Some packages provide this
++'INSTALL' file but do not implement all of the features documented
++below.  The lack of an optional feature in a given package is not
++necessarily a bug.  More recommendations for GNU packages can be found
++in *note Makefile Conventions: (standards)Makefile Conventions.
+ 
+-   The `configure' shell script attempts to guess correct values for
++   The 'configure' shell script attempts to guess correct values for
+ various system-dependent variables used during compilation.  It uses
+-those values to create a `Makefile' in each directory of the package.
+-It may also create one or more `.h' files containing system-dependent
+-definitions.  Finally, it creates a shell script `config.status' that
++those values to create a 'Makefile' in each directory of the package.
++It may also create one or more '.h' files containing system-dependent
++definitions.  Finally, it creates a shell script 'config.status' that
+ you can run in the future to recreate the current configuration, and a
+-file `config.log' containing compiler output (useful mainly for
+-debugging `configure').
++file 'config.log' containing compiler output (useful mainly for
++debugging 'configure').
+ 
+-   It can also use an optional file (typically called `config.cache'
+-and enabled with `--cache-file=config.cache' or simply `-C') that saves
+-the results of its tests to speed up reconfiguring.  (Caching is
+-disabled by default to prevent problems with accidental use of stale
+-cache files.)
++   It can also use an optional file (typically called 'config.cache' and
++enabled with '--cache-file=config.cache' or simply '-C') that saves the
++results of its tests to speed up reconfiguring.  Caching is disabled by
++default to prevent problems with accidental use of stale cache files.
+ 
+    If you need to do unusual things to compile the package, please try
+-to figure out how `configure' could check whether to do them, and mail
+-diffs or instructions to the address given in the `README' so they can
++to figure out how 'configure' could check whether to do them, and mail
++diffs or instructions to the address given in the 'README' so they can
+ be considered for the next release.  If you are using the cache, and at
+-some point `config.cache' contains results you don't want to keep, you
++some point 'config.cache' contains results you don't want to keep, you
+ may remove or edit it.
+ 
+-   The file `configure.ac' (or `configure.in') is used to create
+-`configure' by a program called `autoconf'.  You only need
+-`configure.ac' if you want to change it or regenerate `configure' using
+-a newer version of `autoconf'.
++   The file 'configure.ac' (or 'configure.in') is used to create
++'configure' by a program called 'autoconf'.  You need 'configure.ac' if
++you want to change it or regenerate 'configure' using a newer version of
++'autoconf'.
+ 
+-The simplest way to compile this package is:
++   The simplest way to compile this package is:
+ 
+-  1. `cd' to the directory containing the package's source code and type
+-     `./configure' to configure the package for your system.  If you're
+-     using `csh' on an old version of System V, you might need to type
+-     `sh ./configure' instead to prevent `csh' from trying to execute
+-     `configure' itself.
++  1. 'cd' to the directory containing the package's source code and type
++     './configure' to configure the package for your system.
+ 
+-     Running `configure' takes awhile.  While running, it prints some
+-     messages telling which features it is checking for.
++     Running 'configure' might take a while.  While running, it prints
++     some messages telling which features it is checking for.
+ 
+-  2. Type `make' to compile the package.
++  2. Type 'make' to compile the package.
+ 
+-  3. Optionally, type `make check' to run any self-tests that come with
+-     the package.
++  3. Optionally, type 'make check' to run any self-tests that come with
++     the package, generally using the just-built uninstalled binaries.
+ 
+-  4. Type `make install' to install the programs and any data files and
+-     documentation.
++  4. Type 'make install' to install the programs and any data files and
++     documentation.  When installing into a prefix owned by root, it is
++     recommended that the package be configured and built as a regular
++     user, and only the 'make install' phase executed with root
++     privileges.
+ 
+-  5. You can remove the program binaries and object files from the
+-     source code directory by typing `make clean'.  To also remove the
+-     files that `configure' created (so you can compile the package for
+-     a different kind of computer), type `make distclean'.  There is
+-     also a `make maintainer-clean' target, but that is intended mainly
++  5. Optionally, type 'make installcheck' to repeat any self-tests, but
++     this time using the binaries in their final installed location.
++     This target does not install anything.  Running this target as a
++     regular user, particularly if the prior 'make install' required
++     root privileges, verifies that the installation completed
++     correctly.
++
++  6. You can remove the program binaries and object files from the
++     source code directory by typing 'make clean'.  To also remove the
++     files that 'configure' created (so you can compile the package for
++     a different kind of computer), type 'make distclean'.  There is
++     also a 'make maintainer-clean' target, but that is intended mainly
+      for the package's developers.  If you use it, you may have to get
+      all sorts of other programs in order to regenerate files that came
+      with the distribution.
+ 
++  7. Often, you can also type 'make uninstall' to remove the installed
++     files again.  In practice, not all packages have tested that
++     uninstallation works correctly, even though it is required by the
++     GNU Coding Standards.
++
++  8. Some packages, particularly those that use Automake, provide 'make
++     distcheck', which can by used by developers to test that all other
++     targets like 'make install' and 'make uninstall' work correctly.
++     This target is generally not run by end users.
++
+ Compilers and Options
+ =====================
+ 
+-Some systems require unusual options for compilation or linking that the
+-`configure' script does not know about.  Run `./configure --help' for
+-details on some of the pertinent environment variables.
++   Some systems require unusual options for compilation or linking that
++the 'configure' script does not know about.  Run './configure --help'
++for details on some of the pertinent environment variables.
+ 
+-   You can give `configure' initial values for configuration parameters
+-by setting variables in the command line or in the environment.  Here
+-is an example:
++   You can give 'configure' initial values for configuration parameters
++by setting variables in the command line or in the environment.  Here is
++an example:
+ 
+-     ./configure CC=c89 CFLAGS=-O2 LIBS=-lposix
++     ./configure CC=c99 CFLAGS=-g LIBS=-lposix
+ 
+    *Note Defining Variables::, for more details.
+ 
+ Compiling For Multiple Architectures
+ ====================================
+ 
+-You can compile the package for more than one kind of computer at the
++   You can compile the package for more than one kind of computer at the
+ same time, by placing the object files for each architecture in their
+-own directory.  To do this, you must use a version of `make' that
+-supports the `VPATH' variable, such as GNU `make'.  `cd' to the
++own directory.  To do this, you can use GNU 'make'.  'cd' to the
+ directory where you want the object files and executables to go and run
+-the `configure' script.  `configure' automatically checks for the
+-source code in the directory that `configure' is in and in `..'.
++the 'configure' script.  'configure' automatically checks for the source
++code in the directory that 'configure' is in and in '..'.  This is known
++as a "VPATH" build.
++
++   With a non-GNU 'make', it is safer to compile the package for one
++architecture at a time in the source code directory.  After you have
++installed the package for one architecture, use 'make distclean' before
++reconfiguring for another architecture.
+ 
+-   If you have to use a `make' that does not support the `VPATH'
+-variable, you have to compile the package for one architecture at a
+-time in the source code directory.  After you have installed the
+-package for one architecture, use `make distclean' before reconfiguring
+-for another architecture.
++   On MacOS X 10.5 and later systems, you can create libraries and
++executables that work on multiple system types--known as "fat" or
++"universal" binaries--by specifying multiple '-arch' options to the
++compiler but only a single '-arch' option to the preprocessor.  Like
++this:
++
++     ./configure CC="gcc -arch i386 -arch x86_64 -arch ppc -arch ppc64" \
++                 CXX="g++ -arch i386 -arch x86_64 -arch ppc -arch ppc64" \
++                 CPP="gcc -E" CXXCPP="g++ -E"
++
++   This is not guaranteed to produce working output in all cases, you
++may have to build one architecture at a time and combine the results
++using the 'lipo' tool if you have problems.
+ 
+ Installation Names
+ ==================
+ 
+-By default, `make install' installs the package's commands under
+-`/usr/local/bin', include files under `/usr/local/include', etc.  You
+-can specify an installation prefix other than `/usr/local' by giving
+-`configure' the option `--prefix=PREFIX'.
++   By default, 'make install' installs the package's commands under
++'/usr/local/bin', include files under '/usr/local/include', etc.  You
++can specify an installation prefix other than '/usr/local' by giving
++'configure' the option '--prefix=PREFIX', where PREFIX must be an
++absolute file name.
+ 
+    You can specify separate installation prefixes for
+ architecture-specific files and architecture-independent files.  If you
+-pass the option `--exec-prefix=PREFIX' to `configure', the package uses
++pass the option '--exec-prefix=PREFIX' to 'configure', the package uses
+ PREFIX as the prefix for installing programs and libraries.
+ Documentation and other data files still use the regular prefix.
+ 
+    In addition, if you use an unusual directory layout you can give
+-options like `--bindir=DIR' to specify different values for particular
+-kinds of files.  Run `configure --help' for a list of the directories
+-you can set and what kinds of files go in them.
+-
+-   If the package supports it, you can cause programs to be installed
+-with an extra prefix or suffix on their names by giving `configure' the
+-option `--program-prefix=PREFIX' or `--program-suffix=SUFFIX'.
++options like '--bindir=DIR' to specify different values for particular
++kinds of files.  Run 'configure --help' for a list of the directories
++you can set and what kinds of files go in them.  In general, the default
++for these options is expressed in terms of '${prefix}', so that
++specifying just '--prefix' will affect all of the other directory
++specifications that were not explicitly provided.
++
++   The most portable way to affect installation locations is to pass the
++correct locations to 'configure'; however, many packages provide one or
++both of the following shortcuts of passing variable assignments to the
++'make install' command line to change installation locations without
++having to reconfigure or recompile.
++
++   The first method involves providing an override variable for each
++affected directory.  For example, 'make install
++prefix=/alternate/directory' will choose an alternate location for all
++directory configuration variables that were expressed in terms of
++'${prefix}'.  Any directories that were specified during 'configure',
++but not in terms of '${prefix}', must each be overridden at install time
++for the entire installation to be relocated.  The approach of makefile
++variable overrides for each directory variable is required by the GNU
++Coding Standards, and ideally causes no recompilation.  However, some
++platforms have known limitations with the semantics of shared libraries
++that end up requiring recompilation when using this method, particularly
++noticeable in packages that use GNU Libtool.
++
++   The second method involves providing the 'DESTDIR' variable.  For
++example, 'make install DESTDIR=/alternate/directory' will prepend
++'/alternate/directory' before all installation names.  The approach of
++'DESTDIR' overrides is not required by the GNU Coding Standards, and
++does not work on platforms that have drive letters.  On the other hand,
++it does better at avoiding recompilation issues, and works well even
++when some directory options were not specified in terms of '${prefix}'
++at 'configure' time.
+ 
+ Optional Features
+ =================
+ 
+-Some packages pay attention to `--enable-FEATURE' options to
+-`configure', where FEATURE indicates an optional part of the package.
+-They may also pay attention to `--with-PACKAGE' options, where PACKAGE
+-is something like `gnu-as' or `x' (for the X Window System).  The
+-`README' should mention any `--enable-' and `--with-' options that the
++   If the package supports it, you can cause programs to be installed
++with an extra prefix or suffix on their names by giving 'configure' the
++option '--program-prefix=PREFIX' or '--program-suffix=SUFFIX'.
++
++   Some packages pay attention to '--enable-FEATURE' options to
++'configure', where FEATURE indicates an optional part of the package.
++They may also pay attention to '--with-PACKAGE' options, where PACKAGE
++is something like 'gnu-as' or 'x' (for the X Window System).  The
++'README' should mention any '--enable-' and '--with-' options that the
+ package recognizes.
+ 
+-   For packages that use the X Window System, `configure' can usually
++   For packages that use the X Window System, 'configure' can usually
+ find the X include and library files automatically, but if it doesn't,
+-you can use the `configure' options `--x-includes=DIR' and
+-`--x-libraries=DIR' to specify their locations.
++you can use the 'configure' options '--x-includes=DIR' and
++'--x-libraries=DIR' to specify their locations.
++
++   Some packages offer the ability to configure how verbose the
++execution of 'make' will be.  For these packages, running './configure
++--enable-silent-rules' sets the default to minimal output, which can be
++overridden with 'make V=1'; while running './configure
++--disable-silent-rules' sets the default to verbose, which can be
++overridden with 'make V=0'.
++
++Particular systems
++==================
++
++   On HP-UX, the default C compiler is not ANSI C compatible.  If GNU CC
++is not installed, it is recommended to use the following options in
++order to use an ANSI C compiler:
++
++     ./configure CC="cc -Ae -D_XOPEN_SOURCE=500"
++
++and if that doesn't work, install pre-built binaries of GCC for HP-UX.
++
++   HP-UX 'make' updates targets which have the same time stamps as their
++prerequisites, which makes it generally unusable when shipped generated
++files such as 'configure' are involved.  Use GNU 'make' instead.
++
++   On OSF/1 a.k.a. Tru64, some versions of the default C compiler cannot
++parse its '<wchar.h>' header file.  The option '-nodtk' can be used as a
++workaround.  If GNU CC is not installed, it is therefore recommended to
++try
++
++     ./configure CC="cc"
++
++and if that doesn't work, try
++
++     ./configure CC="cc -nodtk"
++
++   On Solaris, don't put '/usr/ucb' early in your 'PATH'.  This
++directory contains several dysfunctional programs; working variants of
++these programs are available in '/usr/bin'.  So, if you need '/usr/ucb'
++in your 'PATH', put it _after_ '/usr/bin'.
++
++   On Haiku, software installed for all users goes in '/boot/common',
++not '/usr/local'.  It is recommended to use the following options:
++
++     ./configure --prefix=/boot/common
+ 
+ Specifying the System Type
+ ==========================
+ 
+-There may be some features `configure' cannot figure out automatically,
+-but needs to determine by the type of machine the package will run on.
+-Usually, assuming the package is built to be run on the _same_
+-architectures, `configure' can figure that out, but if it prints a
+-message saying it cannot guess the machine type, give it the
+-`--build=TYPE' option.  TYPE can either be a short name for the system
+-type, such as `sun4', or a canonical name which has the form:
++   There may be some features 'configure' cannot figure out
++automatically, but needs to determine by the type of machine the package
++will run on.  Usually, assuming the package is built to be run on the
++_same_ architectures, 'configure' can figure that out, but if it prints
++a message saying it cannot guess the machine type, give it the
++'--build=TYPE' option.  TYPE can either be a short name for the system
++type, such as 'sun4', or a canonical name which has the form:
+ 
+      CPU-COMPANY-SYSTEM
+ 
+ where SYSTEM can have one of these forms:
+ 
+-     OS KERNEL-OS
++     OS
++     KERNEL-OS
+ 
+-   See the file `config.sub' for the possible values of each field.  If
+-`config.sub' isn't included in this package, then this package doesn't
++   See the file 'config.sub' for the possible values of each field.  If
++'config.sub' isn't included in this package, then this package doesn't
+ need to know the machine type.
+ 
+    If you are _building_ compiler tools for cross-compiling, you should
+-use the option `--target=TYPE' to select the type of system they will
++use the option '--target=TYPE' to select the type of system they will
+ produce code for.
+ 
+    If you want to _use_ a cross compiler, that generates code for a
+ platform different from the build platform, you should specify the
+ "host" platform (i.e., that on which the generated programs will
+-eventually be run) with `--host=TYPE'.
++eventually be run) with '--host=TYPE'.
+ 
+ Sharing Defaults
+ ================
+ 
+-If you want to set default values for `configure' scripts to share, you
+-can create a site shell script called `config.site' that gives default
+-values for variables like `CC', `cache_file', and `prefix'.
+-`configure' looks for `PREFIX/share/config.site' if it exists, then
+-`PREFIX/etc/config.site' if it exists.  Or, you can set the
+-`CONFIG_SITE' environment variable to the location of the site script.
+-A warning: not all `configure' scripts look for a site script.
++   If you want to set default values for 'configure' scripts to share,
++you can create a site shell script called 'config.site' that gives
++default values for variables like 'CC', 'cache_file', and 'prefix'.
++'configure' looks for 'PREFIX/share/config.site' if it exists, then
++'PREFIX/etc/config.site' if it exists.  Or, you can set the
++'CONFIG_SITE' environment variable to the location of the site script.
++A warning: not all 'configure' scripts look for a site script.
+ 
+ Defining Variables
+ ==================
+ 
+-Variables not defined in a site shell script can be set in the
+-environment passed to `configure'.  However, some packages may run
++   Variables not defined in a site shell script can be set in the
++environment passed to 'configure'.  However, some packages may run
+ configure again during the build, and the customized values of these
+ variables may be lost.  In order to avoid this problem, you should set
+-them in the `configure' command line, using `VAR=value'.  For example:
++them in the 'configure' command line, using 'VAR=value'.  For example:
+ 
+      ./configure CC=/usr/local2/bin/gcc
+ 
+-causes the specified `gcc' to be used as the C compiler (unless it is
+-overridden in the site shell script).  Here is a another example:
++causes the specified 'gcc' to be used as the C compiler (unless it is
++overridden in the site shell script).
+ 
+-     /bin/bash ./configure CONFIG_SHELL=/bin/bash
++Unfortunately, this technique does not work for 'CONFIG_SHELL' due to an
++Autoconf limitation.  Until the limitation is lifted, you can use this
++workaround:
+ 
+-Here the `CONFIG_SHELL=/bin/bash' operand causes subsequent
+-configuration-related scripts to be executed by `/bin/bash'.
++     CONFIG_SHELL=/bin/bash ./configure CONFIG_SHELL=/bin/bash
+ 
+-`configure' Invocation
++'configure' Invocation
+ ======================
+ 
+-`configure' recognizes the following options to control how it operates.
++   'configure' recognizes the following options to control how it
++operates.
++
++'--help'
++'-h'
++     Print a summary of all of the options to 'configure', and exit.
+ 
+-`--help'
+-`-h'
+-     Print a summary of the options to `configure', and exit.
++'--help=short'
++'--help=recursive'
++     Print a summary of the options unique to this package's
++     'configure', and exit.  The 'short' variant lists options used only
++     in the top level, while the 'recursive' variant lists options also
++     present in any nested packages.
+ 
+-`--version'
+-`-V'
+-     Print the version of Autoconf used to generate the `configure'
++'--version'
++'-V'
++     Print the version of Autoconf used to generate the 'configure'
+      script, and exit.
+ 
+-`--cache-file=FILE'
++'--cache-file=FILE'
+      Enable the cache: use and save the results of the tests in FILE,
+-     traditionally `config.cache'.  FILE defaults to `/dev/null' to
++     traditionally 'config.cache'.  FILE defaults to '/dev/null' to
+      disable caching.
+ 
+-`--config-cache'
+-`-C'
+-     Alias for `--cache-file=config.cache'.
++'--config-cache'
++'-C'
++     Alias for '--cache-file=config.cache'.
+ 
+-`--quiet'
+-`--silent'
+-`-q'
++'--quiet'
++'--silent'
++'-q'
+      Do not print messages saying which checks are being made.  To
+-     suppress all normal output, redirect it to `/dev/null' (any error
++     suppress all normal output, redirect it to '/dev/null' (any error
+      messages will still be shown).
+ 
+-`--srcdir=DIR'
++'--srcdir=DIR'
+      Look for the package's source code in directory DIR.  Usually
+-     `configure' can determine that directory automatically.
++     'configure' can determine that directory automatically.
++
++'--prefix=DIR'
++     Use DIR as the installation prefix.  *note Installation Names:: for
++     more details, including other options available for fine-tuning the
++     installation locations.
+ 
+-`configure' also accepts some other, not widely useful, options.  Run
+-`configure --help' for more details.
++'--no-create'
++'-n'
++     Run the configure checks, but stop before creating any output
++     files.
+ 
++'configure' also accepts some other, not widely useful, options.  Run
++'configure --help' for more details.
+diff --git a/cmdlang/Makefile.am b/cmdlang/Makefile.am
+index 0ca3827b..1ef91256 100644
+--- a/cmdlang/Makefile.am
++++ b/cmdlang/Makefile.am
+@@ -15,8 +15,7 @@ libOpenIPMIcmdlang_la_SOURCES = cmdlang.c cmd_domain.c cmd_entity.c cmd_mc.c \
+ libOpenIPMIcmdlang_la_LIBADD = -lm \
+ 	$(top_builddir)/utils/libOpenIPMIutils.la \
+ 	$(top_builddir)/lib/libOpenIPMI.la
+-libOpenIPMIcmdlang_la_LDFLAGS = -rdynamic -version-info $(LD_VERSION) \
+-	-L$(libdir)
++libOpenIPMIcmdlang_la_LDFLAGS = -rdynamic -version-info $(LD_VERSION)
+ 
+ bin_PROGRAMS = openipmish
+ 
+diff --git a/configure.ac b/configure.ac
+index 04610411..417fe24c 100644
+--- a/configure.ac
++++ b/configure.ac
+@@ -267,6 +267,15 @@ AC_ARG_WITH(marvell-bmc,
+ )
+ AC_SUBST([MARVELL_BMC_DIR])
+ 
++MLXBW_DIR=
++AC_ARG_WITH(mlxbw,
++[  --with-mlxbw            Enable the Mellanox Bluewhale BMC.],
++    AC_DEFINE(MLX_BW_IPMID, 1, [define to 1])
++    AM_CONDITIONAL([MLX_BW_IPMID],[true])
++    MLXBW_DIR=mlxbw
++)
++AC_SUBST([MLXBW_DIR])
++
+ AM_PROG_CC_C_O
+ AC_PROG_LIBTOOL
+ AC_STDC_HEADERS
+@@ -789,6 +798,7 @@ AC_OUTPUT(Makefile
+ 	  lanserv/OpenIPMI/Makefile
+ 	  lanserv/sdrcomp/Makefile
+ 	  lanserv/marvell-bmc/Makefile
++          lanserv/mlxbw/Makefile
+ 	  sample/Makefile
+ 	  doc/Makefile
+ 	  man/Makefile
+diff --git a/lanserv/Makefile.am b/lanserv/Makefile.am
+index 265b74ac..759f8a4a 100644
+--- a/lanserv/Makefile.am
++++ b/lanserv/Makefile.am
+@@ -6,8 +6,8 @@ PVERSION="1.0.13"
+ 
+ BUILD_CC = @BUILD_CC@
+ 
+-SUBDIRS = OpenIPMI sdrcomp @MARVELL_BMC_DIR@
+-DIST_SUBDIRS = OpenIPMI sdrcomp marvell-bmc
++SUBDIRS = OpenIPMI sdrcomp @MARVELL_BMC_DIR@ @MLXBW_DIR@
++DIST_SUBDIRS = OpenIPMI sdrcomp marvell-bmc mlxbw
+ 
+ AM_CFLAGS = -Wall -Wsign-compare -I$(top_srcdir)/include -DIPMI_CHECK_LOCKS \
+ 	$(OPENSSLINCS) -DPVERSION="\"$(PVERSION)\""
+@@ -26,7 +26,11 @@ IPMILAN_MAN =
+ IPMILAN_NOMAN = ipmilan.8
+ endif
+ 
++if MLX_BW_IPMID
++bin_PROGRAMS = mlx_ipmid $(IPMILAN_PROG)
++else
+ bin_PROGRAMS = ipmi_sim $(IPMILAN_PROG)
++endif
+ 
+ noinst_PROGRAMS = ipmi_checksum
+ 
+@@ -34,8 +38,8 @@ noinst_HEADERS = emu.h bmc.h
+ 
+ libIPMIlanserv_la_SOURCES = lanserv_ipmi.c lanserv_asf.c priv_table.c \
+ 	lanserv_oem_force.c lanserv_config.c config.c serv.c serial_ipmi.c \
+-	persist.c extcmd.c
+-libIPMIlanserv_la_LIBADD = $(OPENSSLLIBS) -ldl $(RT_LIB)
++	persist.c extcmd.c ipmb_ipmi.c
++libIPMIlanserv_la_LIBADD = $(OPENSSLLIBS) -ldl
+ libIPMIlanserv_la_LDFLAGS = -version-info $(LD_VERSION) \
+ 	../utils/libOpenIPMIutils.la
+ 
+@@ -43,17 +47,27 @@ ipmi_checksum_SOURCES = ipmi_checksum.c
+ 
+ if HAVE_OPENIPMI_SMI
+ ipmilan_SOURCES = lanserv.c
+-ipmilan_LDADD = $(POPTLIBS) libIPMIlanserv.la -ldl $(RT_LIB)
++ipmilan_LDADD = $(POPTLIBS) libIPMIlanserv.la -ldl
+ ipmilan_LDFLAGS = -rdynamic ../unix/libOpenIPMIposix.la \
+ 	../utils/libOpenIPMIutils.la
+ endif
+ 
++if MLX_BW_IPMID
++mlx_ipmid_SOURCES = ipmi_sim.c bmc.c emu_cmd.c sol.c \
++	bmc_storage.c bmc_app.c bmc_chassis.c bmc_transport.c \
++	bmc_sensor.c bmc_picmg.c
++
++mlx_ipmid_LDADD = $(POPTLIBS) libIPMIlanserv.la -lpthread
++mlx_ipmid_LDFLAGS = -rdynamic ../unix/libOpenIPMIposix.la \
++	../utils/libOpenIPMIutils.la
++else
+ ipmi_sim_SOURCES = ipmi_sim.c bmc.c emu_cmd.c sol.c \
+ 	bmc_storage.c bmc_app.c bmc_chassis.c bmc_transport.c \
+ 	bmc_sensor.c bmc_picmg.c
+-ipmi_sim_LDADD = $(POPTLIBS) libIPMIlanserv.la -lpthread $(RT_LIB)
++ipmi_sim_LDADD = $(POPTLIBS) libIPMIlanserv.la -lpthread
+ ipmi_sim_LDFLAGS = -rdynamic ../unix/libOpenIPMIposix.la \
+ 	../utils/libOpenIPMIutils.la $(SOCKETLIB)
++endif
+ 
+ man_MANS = $(IPMILAN_MAN) ipmi_lan.5 ipmi_sim.1 ipmi_sim_cmd.5
+ 
+@@ -61,6 +75,7 @@ READMES = README.ipmi_sim README.vm README.design README.yourownbmc
+ EXTRA_DIST = atca.emu lan.conf ipmisim1.emu ipmisim1.sdrs \
+ 	$(man_MANS) $(IPMILAN_NOMAN) $(READMES)
+ 
++if !MLX_BW_IPMID
+ install-data-local:
+ 	$(INSTALL) -m 755 -d "$(DESTDIR)$(sysconfdir)/ipmi/"; \
+ 	$(INSTALL) -m 644 $(srcdir)/lan.conf "$(DESTDIR)$(sysconfdir)/ipmi/"; 
+@@ -80,3 +95,4 @@ uninstall-local:
+ 	-rmdir "$(DESTDIR)$(sysconfdir)/ipmi" 2>/dev/null
+ 
+ CLEANFILES = ipmisim1.bsdr
++endif
+diff --git a/lanserv/OpenIPMI/Makefile.am b/lanserv/OpenIPMI/Makefile.am
+index ab1e5140..7c17c107 100644
+--- a/lanserv/OpenIPMI/Makefile.am
++++ b/lanserv/OpenIPMI/Makefile.am
+@@ -1,3 +1,3 @@
+ 
+ pkginclude_HEADERS = lanserv.h serserv.h serv.h extcmd.h persist.h msg.h \
+-	mcserv.h
++	mcserv.h ipmbserv.h
+diff --git a/lanserv/OpenIPMI/ipmbserv.h b/lanserv/OpenIPMI/ipmbserv.h
+new file mode 100644
+index 00000000..06ee342d
+--- /dev/null
++++ b/lanserv/OpenIPMI/ipmbserv.h
+@@ -0,0 +1,83 @@
++/*
++ * ipmbserv.h
++ *
++ * IPMB server include file
++ *
++ * Copyright 2019 Mellanox
++ *
++ * This software is available to you under a choice of one of two
++ * licenses.  You may choose to be licensed under the terms of the GNU
++ * Lesser General Public License (GPL) Version 2 or the modified BSD
++ * license below.  The following disclamer applies to both licenses:
++ *
++ *  THIS SOFTWARE IS PROVIDED ``AS IS'' AND ANY EXPRESS OR IMPLIED
++ *  WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
++ *  MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
++ *  IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT,
++ *  INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
++ *  BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
++ *  OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND
++ *  ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR
++ *  TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
++ *  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
++ *
++ * GNU Lesser General Public Licence
++ *
++ *  This program is free software; you can redistribute it and/or
++ *  modify it under the terms of the GNU Lesser General Public License
++ *  as published by the Free Software Foundation; either version 2 of
++ *  the License, or (at your option) any later version.
++ *
++ *  You should have received a copy of the GNU Lesser General Public
++ *  License along with this program; if not, write to the Free
++ *  Software Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
++ *
++ * Modified BSD Licence
++ *
++ * Redistribution and use in source and binary forms, with or without
++ * modification, are permitted provided that the following conditions
++ * are met:
++ *
++ *   1. Redistributions of source code must retain the above copyright
++ *      notice, this list of conditions and the following disclaimer.
++ *   2. Redistributions in binary form must reproduce the above
++ *      copyright notice, this list of conditions and the following
++ *      disclaimer in the documentation and/or other materials provided
++ *      with the distribution.
++ *   3. The name of the author may not be used to endorse or promote
++ *      products derived from this software without specific prior
++ *      written permission.
++ */
++
++#ifndef __IPMBSERV_H
++#define __IPMBSERV_H
++
++#include <OpenIPMI/serv.h>
++#include <OpenIPMI/os_handler.h>
++
++typedef struct ipmbserv_data_s ipmbserv_data_t;
++
++struct ipmbserv_data_s {
++    lan_addr_t addr;
++
++    channel_t channel;
++
++    os_handler_t *os_hnd;
++
++    sys_data_t *sysinfo;
++
++    void *user_info;
++
++    int fd;
++
++    void (*send_out)(ipmbserv_data_t *si, unsigned char *data,
++		     unsigned int data_len);
++
++    char *ipmbdev;
++};
++
++int ipmbserv_read_config(char **tokptr, sys_data_t *sys, const char **errstr);
++int ipmbserv_init(ipmbserv_data_t *ipmb);
++void ipmbserv_handle_data(ipmbserv_data_t *ipmb, uint8_t *imsg, unsigned int len);
++
++#endif /* __IPMBSERV_H */
+diff --git a/lanserv/OpenIPMI/serv.h b/lanserv/OpenIPMI/serv.h
+index d2087f5a..6bcfc354 100644
+--- a/lanserv/OpenIPMI/serv.h
++++ b/lanserv/OpenIPMI/serv.h
+@@ -219,6 +219,9 @@ struct channel_s
+      */
+     int (*oem_intf_recv_handler)(channel_t *chan, msg_t *msg,
+ 				 unsigned char *rdata, unsigned int *rdata_len);
++
++    /* Set to 1 if ipmb channel 0 is listed in the config file, 0 otherwise */
++    int prim_ipmb_in_cfg_file;
+ };
+ 
+ struct user_s
+@@ -408,6 +411,7 @@ struct sys_data_s {
+     void (*cfree)(channel_t *chan, void *data);
+     int (*lan_channel_init)(void *info, channel_t *chan);
+     int (*ser_channel_init)(void *info, channel_t *chan);
++    int (*ipmb_channel_init)(void *info, channel_t *chan);
+ };
+ 
+ static inline void
+diff --git a/lanserv/README.design b/lanserv/README.design
+index 2f897c47..5260a6cd 100644
+--- a/lanserv/README.design
++++ b/lanserv/README.design
+@@ -31,6 +31,8 @@ msg.h - This defines an IPMI message that is passed around, and a few
+ 
+ serserv.h - The configuration of a serial interface.
+ 
++ipmbserv.h - The configuration of an IPMB interface.
++
+ serv.h - This defines data structures used by the whole system.
+ 
+ 
+@@ -77,6 +79,8 @@ emu.h - Defines the interface between bmc_xxx.c and emu_cmd.c
+ extcmd.c - Code for running the external command for dealing with LAN
+ 	configuration.
+ 
++ipmb_ipmi.c - An implementation of the IPMB protocol.
++
+ ipmi_sim.c - The main file for the ipmi_sim program.
+ 
+ lanserv_asf.c - Handles LAN ASF commands.
+@@ -179,4 +183,4 @@ It is called from config.c to handle sol-specific configuration.
+ It installs a hook into lanserv_ipmi.c to receive the SOL payload and
+ send the SOL payload.
+ 
+-It ties into bmc.c to handle SOL-specific commands.
+\ No newline at end of file
++It ties into bmc.c to handle SOL-specific commands.
+diff --git a/lanserv/bmc.c b/lanserv/bmc.c
+index 93d0b3fc..264b4ae6 100644
+--- a/lanserv/bmc.c
++++ b/lanserv/bmc.c
+@@ -613,6 +613,9 @@ ipmi_mc_enable(lmc_data_t *mc)
+ 	    err = sys->lan_channel_init(sys->info, chan);
+ 	else if (chan->medium_type == IPMI_CHANNEL_MEDIUM_RS232)
+ 	    err = sys->ser_channel_init(sys->info, chan);
++	else if ((chan->medium_type == IPMI_CHANNEL_MEDIUM_IPMB) &&
++		((chan->channel_num != 0) || (chan->prim_ipmb_in_cfg_file)))
++	    err = sys->ipmb_channel_init(sys->info, chan);
+ 	else 
+ 	    chan_init(chan);
+ 	if (err) {
+@@ -802,6 +805,7 @@ ipmi_mc_alloc_unconfigured(sys_data_t *sys, unsigned char ipmb,
+     mc->ipmb_channel.protocol_type = IPMI_CHANNEL_PROTOCOL_IPMB;
+     mc->ipmb_channel.session_support = IPMI_CHANNEL_SESSION_LESS;
+     mc->ipmb_channel.active_sessions = 0;
++    mc->ipmb_channel.prim_ipmb_in_cfg_file = 0;
+     mc->channels[0] = &mc->ipmb_channel;
+     mc->channels[0]->log = sys->clog;
+ 
+diff --git a/lanserv/bmc_app.c b/lanserv/bmc_app.c
+index 460a2ad8..20a489aa 100644
+--- a/lanserv/bmc_app.c
++++ b/lanserv/bmc_app.c
+@@ -58,6 +58,9 @@
+ #include <OpenIPMI/ipmi_mc.h>
+ #include <OpenIPMI/ipmi_lan.h>
+ 
++#include <config.h>
++#include <stdlib.h>
++
+ static void
+ handle_get_device_id(lmc_data_t    *mc,
+ 		     msg_t         *msg,
+@@ -188,11 +191,13 @@ watchdog_timeout(void *cb_data)
+     if (!mc->watchdog_running)
+ 	goto out;
+ 
++#ifndef MLX_BW_IPMID
+     if( !sens ) {
+ 	// NOTE(noelbk): The watchdog sensor should have been defined
+ 	// earlier, but don't SEGFAULT if it isn't
+ 	goto out;
+     }
++#endif /* ifndef MLX_BW_IPMID */
+ 
+     if (! mc->watchdog_preaction_ran) {
+ 	struct timeval tv, now;
+@@ -265,12 +270,13 @@ static void
+ do_watchdog_reset(lmc_data_t *mc)
+ {
+     struct timeval tv;
+-
++#ifndef MLX_BW_IPMID
+     if (IPMI_MC_WATCHDOG_GET_ACTION(mc) ==
+ 	IPMI_MC_WATCHDOG_ACTION_NONE) {
+ 	mc->watchdog_running = 0;
+ 	return;
+     }
++#endif /* ifndef  MLX_BW_IPMID */
+     mc->watchdog_preaction_ran = 0;
+ 
+     /* Timeout is in tenths of a second, offset is in seconds */
+diff --git a/lanserv/config.c b/lanserv/config.c
+index f0dda9f5..783ccf3f 100644
+--- a/lanserv/config.c
++++ b/lanserv/config.c
+@@ -64,6 +64,7 @@
+ #include <OpenIPMI/serv.h>
+ #include <OpenIPMI/lanserv.h>
+ #include <OpenIPMI/serserv.h>
++#include <OpenIPMI/ipmbserv.h>
+ #include <OpenIPMI/persist.h>
+ 
+ void
+@@ -829,6 +830,8 @@ read_config(sys_data_t *sys,
+ 	    }
+ 	} else if (strcmp(tok, "user") == 0) {
+ 	    err = get_user(&tokptr, sys, &errstr);
++	} else if (strcmp(tok, "ipmb") == 0) {
++	    err = ipmbserv_read_config(&tokptr, sys, &errstr);
+ 	} else if (strcmp(tok, "serial") == 0) {
+ 	    err = serserv_read_config(&tokptr, sys, &errstr);
+ 	} else if (strcmp(tok, "sol") == 0) {
+diff --git a/lanserv/ipmb_ipmi.c b/lanserv/ipmb_ipmi.c
+new file mode 100644
+index 00000000..d98b3ccd
+--- /dev/null
++++ b/lanserv/ipmb_ipmi.c
+@@ -0,0 +1,219 @@
++/*
++ * ipmb_ipmi.c
++ *
++ * IPMB server interface.
++ *
++ * Copyright 2019 Mellanox
++ *
++ * This software is available to you under a choice of one of two
++ * licenses.  You may choose to be licensed under the terms of the GNU
++ * Lesser General Public License (GPL) Version 2 or the modified BSD
++ * license below.  The following disclamer applies to both licenses:
++ *
++ *  THIS SOFTWARE IS PROVIDED ``AS IS'' AND ANY EXPRESS OR IMPLIED
++ *  WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
++ *  MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
++ *  IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT,
++ *  INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
++ *  BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
++ *  OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND
++ *  ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR
++ *  TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
++ *  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
++ *
++ * GNU Lesser General Public Licence
++ *
++ *  This program is free software; you can redistribute it and/or
++ *  modify it under the terms of the GNU Lesser General Public License
++ *  as published by the Free Software Foundation; either version 2 of
++ *  the License, or (at your option) any later version.
++ *
++ *  You should have received a copy of the GNU Lesser General Public
++ *  License along with this program; if not, write to the Free
++ *  Software Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
++ *
++ * Modified BSD Licence
++ *
++ * Redistribution and use in source and binary forms, with or without
++ * modification, are permitted provided that the following conditions
++ * are met:
++ *
++ *   1. Redistributions of source code must retain the above copyright
++ *      notice, this list of conditions and the following disclaimer.
++ *   2. Redistributions in binary form must reproduce the above
++ *      copyright notice, this list of conditions and the following
++ *      disclaimer in the documentation and/or other materials provided
++ *      with the distribution.
++ *   3. The name of the author may not be used to endorse or promote
++ *      products derived from this software without specific prior
++ *      written permission.
++ */
++
++#include <string.h>
++#include <stdlib.h>
++#include <OpenIPMI/serv.h>
++#include <OpenIPMI/ipmbserv.h>
++#include <OpenIPMI/ipmi_mc.h>
++
++#define	IPMIDEV_MAX_SIZE	15
++
++static void
++ipmb_send(msg_t *imsg, ipmbserv_data_t *ipmb)
++{
++    unsigned char msg[(IPMI_SIM_MAX_MSG_LENGTH + 7) * 3];
++    unsigned int msg_len;
++
++    msg[0] = imsg->len + 7;
++    msg[1] = imsg->rs_addr;
++    msg[2] = (imsg->netfn << 2) | imsg->rs_lun;
++    msg[3] = -ipmb_checksum(msg + 1, 2, 0);
++    msg[4] = imsg->rq_addr;
++    msg[5] = (imsg->rq_seq << 2) | imsg->rq_lun;
++    msg[6] = imsg->cmd;
++    memcpy(msg + 7, imsg->data, imsg->len);
++    msg_len = imsg->len + 7;
++    msg[msg_len] = -ipmb_checksum(msg + 4, msg_len - 4, 0);
++    msg_len++;
++
++    if (ipmb->sysinfo->debug & DEBUG_RAW_MSG)
++	debug_log_raw_msg(ipmb->sysinfo, msg, msg_len, "Raw ipmb send:");
++    ipmb->send_out(ipmb, msg, msg_len);
++}
++
++static void
++ipmb_return_rsp(channel_t *chan, msg_t *imsg, rsp_msg_t *rsp)
++{
++    ipmbserv_data_t *ipmb = chan->chan_info;
++    msg_t msg;
++
++    msg.netfn = rsp->netfn;
++    msg.cmd = rsp->cmd;
++    msg.data = rsp->data;
++    msg.len = rsp->data_len;
++    msg.rq_lun = imsg->rs_lun;
++    msg.rq_addr = imsg->rs_addr;
++    msg.rs_lun = imsg->rq_lun;
++    msg.rs_addr = imsg->rq_addr;
++    msg.rq_seq = imsg->rq_seq;
++
++    ipmb_send(&msg, ipmb);
++}
++
++int
++ipmbserv_init(ipmbserv_data_t *ipmb)
++{
++    ipmb->channel.return_rsp = ipmb_return_rsp;
++    chan_init(&ipmb->channel);
++
++    return 0;
++}
++
++void
++ipmbserv_handle_data(ipmbserv_data_t *ipmb, uint8_t *imsg, unsigned int len)
++{
++    msg_t msg;
++
++    if (len < 8) {
++	fprintf(stderr, "Message too short\n");
++	return;
++    }
++    /* subtract len field and checksum */
++    len--;
++    imsg++;
++
++    if (ipmb_checksum(imsg, len, 0) != 0) {
++	fprintf(stderr, "Message checksum failure\n");
++	return;
++    }
++    len--;
++
++    memset(&msg, 0, sizeof(msg));
++
++    msg.rs_addr = imsg[0];
++    msg.netfn = imsg[1] >> 2;
++    msg.rs_lun = imsg[1] & 3;
++    /* imsg[2] is first checksum */
++    msg.rq_addr = imsg[3];
++    msg.rq_seq = imsg[4] >> 2;
++    msg.rq_lun = imsg[4] & 3;
++    msg.cmd = imsg[5];
++
++    msg.len = len - 6;
++    msg.data = imsg + 6;
++
++    msg.src_addr = NULL;
++    msg.src_len = 0;
++
++    channel_smi_send(&ipmb->channel, &msg);
++}
++
++int
++ipmbserv_read_config(char **tokptr, sys_data_t *sys, const char **errstr)
++{
++    ipmbserv_data_t *ipmb;
++    unsigned int chan_num;
++    int err;
++    const char *tok;
++    char *ipmbdev;
++
++    err = get_uint(tokptr, &chan_num, errstr);
++    if (err)
++	return -1;
++
++    if (chan_num >= IPMI_MAX_CHANNELS) {
++	*errstr = "Invalid channel number, must be 0-15";
++	return -1;
++    }
++
++    /*
++     * Allow an IPMB channel to override the default channel 0.
++     */
++    if (chan_num != 0 && sys->chan_set[chan_num]) {
++	    *errstr = "Channel already in use";
++	    return -1;
++    }
++
++    tok = mystrtok(NULL, " \t\n", tokptr);
++    if (!tok || strcmp(tok, "ipmb_dev_int")) {
++	*errstr = "Config file missing <linux ipmb driver name>";
++	return -1;
++    }
++
++    tok = mystrtok(NULL, " \t\n", tokptr);
++    if (strlen(tok) > IPMIDEV_MAX_SIZE) {
++	*errstr = "Length of device file name %s > 15";
++	return -1;
++    }
++    ipmbdev = strdup(tok);
++    if (!ipmbdev) {
++	*errstr = "Unable to alloc device file name";
++	return -1;
++    }
++
++    ipmb = malloc(sizeof(*ipmb));
++    if (!ipmb) {
++	free(ipmbdev);
++	*errstr = "Out of memory";
++	return -1;
++    }
++    memset(ipmb, 0, sizeof(*ipmb));
++    ipmb->ipmbdev = ipmbdev;
++
++    ipmb->channel.session_support = IPMI_CHANNEL_SESSION_LESS;
++    ipmb->channel.medium_type = IPMI_CHANNEL_MEDIUM_IPMB;
++    ipmb->channel.protocol_type = IPMI_CHANNEL_PROTOCOL_IPMB;
++
++    ipmb->channel.channel_num = chan_num;
++
++    ipmb->sysinfo = sys;
++    ipmb->channel.chan_info = ipmb;
++
++    if (chan_num == 0)
++	ipmb->channel.prim_ipmb_in_cfg_file = 1;
++    else
++	ipmb->channel.prim_ipmb_in_cfg_file = 0;
++
++    sys->chan_set[chan_num] = &ipmb->channel;
++
++    return 0;
++}
+diff --git a/lanserv/ipmi_sim.c b/lanserv/ipmi_sim.c
+index c4e5b188..00912524 100644
+--- a/lanserv/ipmi_sim.c
++++ b/lanserv/ipmi_sim.c
+@@ -90,6 +90,7 @@
+ #include <OpenIPMI/serv.h>
+ #include <OpenIPMI/lanserv.h>
+ #include <OpenIPMI/serserv.h>
++#include <OpenIPMI/ipmbserv.h>
+ 
+ #include "emu.h"
+ #include <OpenIPMI/persist.h>
+@@ -97,7 +98,13 @@
+ #define MAX_ADDR 4
+ 
+ #define BASE_CONF_STR SYSCONFDIR "/ipmi"
++#ifdef MLX_BW_IPMID
++#define MLNX_CONF_FILE_EXT       ".hw"
++static char *config_file = BASE_CONF_STR "/mlxbw.lan.conf";
++#else
+ static char *config_file = BASE_CONF_STR "/lan.conf";
++#endif  /* ifdef MLX_BW_IPMID */
++
+ static const char *statedir = STATEDIR;
+ static char *command_string = NULL;
+ static char *command_file = NULL;
+@@ -308,6 +315,31 @@ lan_data_ready(int lan_fd, void *cb_data, os_hnd_fd_id_t *id)
+     return;
+ }
+ 
++#ifdef MLX_BW_IPMID
++static int
++ipmi_open(char *ipmi_dev)
++{
++    int ipmi_fd;
++
++    if (ipmi_dev) {
++	ipmi_fd = open(ipmi_dev, O_RDWR);
++    } else {
++	ipmi_fd = open("/dev/ipmidev/0", O_RDWR);
++	if (ipmi_fd == -1) {
++	    ipmi_fd = open("/dev/ipmi0", O_RDWR);
++	}
++	if (ipmi_fd == -1) {
++	    ipmi_fd = open("/dev/ipmi-bt-host", O_RDWR);
++	}
++    }
++
++    if (ipmi_fd == -1) {
++	perror("Could not open ipmi device /dev/ipmidev/0, /dev/ipmi0 or /dev/ipmi-bt-host");
++    }
++    return ipmi_fd;
++}
++#endif /* MLX_BW_IPMID */
++
+ static int
+ open_lan_fd(struct sockaddr *addr, socklen_t addr_len)
+ {
+@@ -567,6 +599,100 @@ ser_channel_init(void *info, channel_t *chan)
+     return err;
+ }
+ 
++static int
++ipmb_open(char *ipmi_dev)
++{
++    int ipmi_fd;
++
++    if (!ipmi_dev) {
++	fprintf(stderr, "ipmi_dev is not specified\n");
++	return -1;
++    }
++
++    ipmi_fd = open(ipmi_dev, O_RDWR);
++    if (ipmi_fd == -1)
++        fprintf(stderr, "Could not open ipmi device\n");
++
++    return ipmi_fd;
++}
++
++static void
++ipmb_data_ready(int fd, void *cb_data, os_hnd_fd_id_t *id)
++{
++    ipmbserv_data_t *ipmb = cb_data;
++    unsigned int  len;
++    unsigned char msgd[256];
++
++    len = read(fd, msgd, sizeof(msgd));
++
++    if (ipmb->sysinfo->debug & DEBUG_MSG)
++        printf(">ipmb_data_ready size %d\n", len);
++    if (len <= 0) {
++        if ((len < 0) && (errno == EINTR))
++            return;
++
++        ipmb->os_hnd->remove_fd_to_wait_for(ipmb->os_hnd, id);
++        close(fd);
++        ipmb->fd = -1;
++        return;
++    }
++
++    ipmbserv_handle_data(ipmb, msgd, len);
++}
++
++static void
++ipmb_send(ipmbserv_data_t *ipmb, unsigned char *data, unsigned int data_len)
++{
++    int rv;
++
++    if (ipmb->fd == -1)
++	/* Not connected */
++	return;
++
++    rv = write(ipmb->fd, data, data_len);
++    if (rv) {
++	/* FIXME - log an error. */
++    }
++}
++
++static int
++ipmb_channel_init(void *info, channel_t *chan)
++{
++    misc_data_t *data = info;
++    ipmbserv_data_t *ipmb = chan->chan_info;
++    int err;
++    os_hnd_fd_id_t *fd_id;
++
++    ipmb->os_hnd = data->os_hnd;
++    ipmb->user_info = data;
++    ipmb->send_out = ipmb_send;
++
++    err = ipmbserv_init(ipmb);
++    if (err) {
++        fprintf(stderr, "Unable to init ipmb: 0x%x\n", err);
++        exit(1);
++    }
++
++    ipmb->fd = ipmb_open(ipmb->ipmbdev);
++    if (ipmb->fd == -1){
++        fprintf(stderr, "Unable to open ipmi device file: 0x%x\n", err);
++        exit(1);
++    }
++
++    err = data->os_hnd->add_fd_to_wait_for(data->os_hnd, ipmb->fd,
++                                            ipmb_data_ready, ipmb,
++                                            NULL, &fd_id);
++    if (err) {
++	close(ipmb->fd);
++	ipmb->fd = -1;
++	fprintf(stderr, "Unable to open ipmi device file: 0x%x\n", err);
++	exit(1);
++    }
++
++    isim_add_fd(ipmb->fd);
++    return 0;
++}
++
+ static void
+ isim_log(sys_data_t *sys, int logtype, msg_t *msg, const char *format,
+ 	 va_list ap, int len)
+@@ -1438,6 +1564,7 @@ main(int argc, const char *argv[])
+     sysinfo.cfree = ifree;
+     sysinfo.lan_channel_init = lan_channel_init;
+     sysinfo.ser_channel_init = ser_channel_init;
++    sysinfo.ipmb_channel_init = ipmb_channel_init;
+     data.sys = &sysinfo;
+ 
+     err = pipe(sigpipeh);
+@@ -1509,7 +1636,11 @@ main(int argc, const char *argv[])
+ 	exit(1);
+     }
+ 
++#ifdef MLX_BW_IPMID
++    err = persist_init("mlx_ipmid", sysinfo.name, statedir);
++#else
+     err = persist_init("ipmi_sim", sysinfo.name, statedir);
++#endif /* MLX_BW_IPMID */
+     if (err) {
+ 	fprintf(stderr, "Unable to initialize persistence: %s\n",
+ 		strerror(err));
+@@ -1546,7 +1677,11 @@ main(int argc, const char *argv[])
+ 	strcpy(command_file, BASE_CONF_STR);
+ 	strcat(command_file, "/");
+ 	strcat(command_file, sysinfo.name);
+-	strcat(command_file, ".emu");
++#ifdef MLX_BW_IPMID
++        strcat(command_file, MLNX_CONF_FILE_EXT);
++#else
++        strcat(command_file, ".emu");
++#endif /* MLX_BW_IPMID */
+ 	tf = fopen(command_file, "r");
+ 	if (!tf) {
+ 	    free(command_file);
+diff --git a/lanserv/lan.conf b/lanserv/lan.conf
+index 37732d4b..cec7ebbc 100644
+--- a/lanserv/lan.conf
++++ b/lanserv/lan.conf
+@@ -126,3 +126,16 @@ set_working_mc 0x30
+ # where initstr is the init string passed on the module load line.
+ # It should return 0 on success or an errno no failure.
+ #loadlib "/opt/lib/ipmi_sim_extend.so" "Initialization String"
++
++# "ipmb" should be added to the config file of a device
++# that needs to handle an IPMB request and generate a response
++# back to the requester.
++# In the case of an IPMB bridge request for example, the
++# BMC is considered the requester and the responder device
++# should have a config file defining the IPMB channel number.
++# For example:
++# ipmb <channel number> <linux ipmb driver name> <device file>
++# ipmb 2 ipmb_dev_int /dev/ipmb-2
++#
++# At the moment, this OpenIPMI ipmb interface works with the
++# linux driver ipmb_dev_int.c.
+diff --git a/lanserv/mlxbw/71-mlxbw-events.rules b/lanserv/mlxbw/71-mlxbw-events.rules
+new file mode 100644
+index 00000000..7b1b07f9
+--- /dev/null
++++ b/lanserv/mlxbw/71-mlxbw-events.rules
+@@ -0,0 +1,15 @@
++########################################################################
++# Copyright (c) 2019 Mellanox Technologies.
++# Copyright (c) 2019 Diane Lynch dianel@mellanox.com>
++#
++# Licensed under the GNU General Public License Version 2
++#
++# This program is free software; you can redistribute it and/or modify
++# it under the terms of the GNU General Public License as published by
++# the Free Software Foundation; either version 2 of the License, or
++# (at your option) any later version.
++#
++
++
++SUBSYSTEM=="i2c", KERNEL=="13-0051", ACTION=="add", RUN+="/usr/bin/mlxbw-hw-events.sh add eeprom_bmc %S %p"
++SUBSYSTEM=="i2c", KERNEL=="13-0051", ACTION=="remove", RUN+="/usr/bin/mlxbw-hw-events.sh rm eeprom_bmc %S %p"
+\ No newline at end of file
+diff --git a/lanserv/mlxbw/71-mlxbw-hwmon-events.rules b/lanserv/mlxbw/71-mlxbw-hwmon-events.rules
+new file mode 100644
+index 00000000..5d49c487
+--- /dev/null
++++ b/lanserv/mlxbw/71-mlxbw-hwmon-events.rules
+@@ -0,0 +1,20 @@
++########################################################################
++# Copyright (c) 2019 Mellanox Technologies.
++# Copyright (c) 2019 Diane Lynch <dianel@mellanox.com>
++#
++# Licensed under the GNU General Public License Version 2
++#
++# This program is free software; you can redistribute it and/or modify
++# it under the terms of the GNU General Public License as published by
++# the Free Software Foundation; either version 2 of the License, or
++# (at your option) any later version.
++#
++# Temp Sensors
++SUBSYSTEM=="hwmon", DEVPATH=="/devices/platform/ahb/ahb:apb/f008c000.i2c/i2c-12/12-0048/hwmon/hwmon*", ACTION=="add", RUN+="/usr/bin/mlxbw-hw-events.sh add buv_board %S %p"
++SUBSYSTEM=="hwmon", DEVPATH=="/devices/platform/ahb/ahb:apb/f008c000.i2c/i2c-12/12-0048/hwmon/hwmon*", ACTION=="remove", RUN+="/usr/bin/mlxbw-hw-events.sh rm buv_board %S %p"
++SUBSYSTEM=="hwmon", DEVPATH=="/devices/platform/ahb/ahb:apb/f008d000.i2c/i2c-13/13-004a/hwmon/hwmon*", ACTION=="add", RUN+="/usr/bin/mlxbw-hw-events.sh add bmc_card %S %p"
++SUBSYSTEM=="hwmon", DEVPATH=="/devices/platform/ahb/ahb:apb/f008d000.i2c/i2c-13/13-004a/hwmon/hwmon*", ACTION=="remove", RUN+="/usr/bin/mlxbw-hw-events.sh rm bmc_card %S %p"
++
++# fans
++SUBSYSTEM=="hwmon", DEVPATH=="/devices/platform/ahb/ahb:apb/f0103000.pwm-fan-controller/hwmon/hwmon*", ACTION=="add", RUN+="/usr/bin/mlxbw-hw-events.sh add fan %S %p"
++SUBSYSTEM=="hwmon", DEVPATH=="/devices/platform/ahb/ahb:apb/f0103000.pwm-fan-controller/hwmon/hwmon*", ACTION=="remove", RUN+="/usr/bin/mlxbw-hw-events.sh rm fan %S %p
+\ No newline at end of file
+diff --git a/lanserv/mlxbw/Makefile.am b/lanserv/mlxbw/Makefile.am
+new file mode 100644
+index 00000000..f6d7b8c8
+--- /dev/null
++++ b/lanserv/mlxbw/Makefile.am
+@@ -0,0 +1,29 @@
++AM_CFLAGS = -I$(top_srcdir)/include -I$(top_srcdir)/lanserv
++pkglib_LTLIBRARIES = mlxbw.la
++
++mlxbw_la_SOURCES = mlxbw.c
++mlxbw_la_LDFLAGS = -module
++
++sdrs.bin: mlxbw.sdr\
++		$(top_builddir)/lanserv/sdrcomp/sdrcomp
++	$(top_builddir)/lanserv/sdrcomp/sdrcomp mlxbw.sdr > sdrs.bin
++
++
++install-data-local:
++	$(INSTALL) -m 755 -d "$(DESTDIR)$(sysconfdir)/ipmi/"; \
++	$(INSTALL) -m 755 -d "$(DESTDIR)$(localstatedir)/mlx_ipmid/mlxbw/"; \
++	$(INSTALL) -m 644 $(srcdir)/mlxbw.lan.conf "$(DESTDIR)$(sysconfdir)/ipmi/"; \
++	$(INSTALL) -m 644 $(srcdir)/mlxbw.hw "$(DESTDIR)$(sysconfdir)/ipmi/"; \
++	$(INSTALL) -m 775 $(srcdir)/lancontrol "$(DESTDIR)$(sysconfdir)/ipmi/"; \
++	$(INSTALL) -m 644 $(srcdir)/sdr.20.main "$(DESTDIR)$(localstatedir)/mlx_ipmid/mlxbw/"; \
++	$(INSTALL) -m 775 $(srcdir)/sel_set_log_size.sh "$(DESTDIR)$(bindir)"; \
++	$(INSTALL) -m 775 $(srcdir)/71-mlxbw-events.rules "$(DESTDIR)$(localstatedir)/mlx_ipmid/mlxbw/"; \
++	$(INSTALL) -m 775 $(srcdir)/71-mlxbw-hwmon-events.rules "$(DESTDIR)$(localstatedir)/mlx_ipmid/mlxbw/"; \
++	$(INSTALL) -m 775 $(srcdir)/mlxbw-hw-events.sh "$(DESTDIR)$(bindir)";
++
++uninstall-local:
++	-rm -f "$(DESTDIR)$(sysconfdir)/ipmi/mlxbw.lan.conf"
++	-rm -f "$(DESTDIR)$(sysconfdir)/ipmi/mlxbw.hw"
++	-rm -f "$(DESTDIR)$(localstatedir)/mlx_ipmid/mlxbw/sdr.20.main"
++	-rm -f "$(DESTDIR)$(bindir)/sel_set_log_size.sh"
++	-rmdir "$(DESTDIR)$(sysconfdir)/ipmi" 2>/dev/null"
+diff --git a/lanserv/mlxbw/lancontrol b/lanserv/mlxbw/lancontrol
+new file mode 100644
+index 00000000..25da7833
+--- /dev/null
++++ b/lanserv/mlxbw/lancontrol
+@@ -0,0 +1,295 @@
++#!/bin/sh
++
++#
++# Script for handling external LAN configuration from the
++# IPMI deamon.  This command is generally invoked by the mlx_ipmid
++# to get and set external LAN configuration parameters.
++#
++# It's parameters are:
++#
++#  lancontrol <device> get [parm [parm ...]]
++#  lancontrol <device> set|check [parm val [parm val ...]]
++#
++# where <device> is a network device (eth0, etc.) and parm is one of:
++#  ip_addr
++#  ip_addr_src
++#  mac_addr
++#  subnet_mask
++#  default_gw_ip_addr
++# These are config values out of the IPMI LAN config table that are
++# not IPMI-exclusive, they require setting external things.
++#
++# The output of the "get" is "<parm>:<value>" for each listed parm.
++# The output of the "set" is empty on success.  Error output goes to
++# standard out (so it can be captured in the simulator) and the program
++# returns an error.
++#
++# The IP address values are standard IP addresses in the form a.b.c.d.
++# The MAC addresses ar standard 6 octet xx:xx:xx:xx:xx:xx values.  The
++# only special one is ip_addr_src, which can be "dhcp" or "static".
++#
++# The "check" operation checks to see if a value is valid without
++# committing it.
++#
++
++tmp_ip_addr="0.0.0.0"
++tmp_netmask="0"
++tmp_gateway="0.0.0.0"
++tmp_ip_addr_src="dhcp"
++
++prog=$0
++
++device=$1
++if [ "x$device" = "x" ]; then
++    echo "No device given"
++    exit 1;
++fi
++shift
++
++op=$1
++if [ "x$op" = "x" ]; then
++    echo "No operation given"
++    exit 1
++fi
++shift
++
++do_get() {
++    while [ "x$1" != "x" ]; do
++	case $1 in
++	    ip_addr)
++		val=`ifconfig $device | grep '^ *inet addr:' | tr ':' ' ' | sed 's/.*inet addr \([0-9.]*\).*$/\1/'`
++		if [ "x$val" = "x" ]; then
++		    val="0.0.0.0"
++		fi
++		;;
++
++	    ip_addr_src)
++		if [ ! -f /etc/systemd/network/50-static.network ];  then
++			val="dhcp"
++		else
++			val="static"
++		fi
++		;;
++
++	    mac_addr)
++		val=`ifconfig $device | grep 'HWaddr' | sed 's/.*HWaddr \([0-9a-fA-F:]*\).*$/\1/'`
++		if [ "x$val" = "x" ]; then
++		    val="00:00:00:00:00:00"
++		fi
++		;;
++
++	    subnet_mask)
++		val=`ifconfig $device | grep '^ *inet addr:' | tr ':' ' ' | sed 's/.*Mask \([0-9.]*\).*$/\1/'`
++		if [ "x$val" = "x" ]; then
++		    val="0.0.0.0"
++		fi
++		;;
++
++	    default_gw_ip_addr)
++		val=`route -n | grep '^0\.0\.0\.0' | grep "$device\$" | tr ' ' '\t' | tr -s '\t' '\t' | cut -f 2`
++		if [ "x$val" = "x" ]; then
++		    val="0.0.0.0"
++		fi
++		;;
++
++	    default_gw_mac_addr)
++		val=`route -n | grep '^0\.0\.0\.0' | grep "$device\$" | tr ' ' '\t' | tr -s '\t' '\t' | cut -s -f 2`
++		if [ "x$val" = "x" ]; then
++		    val="00:00:00:00:00:00"
++		else
++		    ping -W 1 -c 1 $val >/dev/null 2>&1
++		    val=`arp -n $val | grep "($val)" | tr ' ' '\t' | tr -s '\t' '\t' | cut -f 4`
++		    if [ "x$val" = "x" -o "x$val" = 'x<incomplete>' ]; then
++			val="00:00:00:00:00:00"
++		    fi
++		fi
++		;;
++
++	    backup_gw_ip_addr)
++		val="0.0.0.0"
++		;;
++
++	    backup_gw_mac_addr)
++		val="00:00:00:00:00:00"
++		;;
++
++	    *)
++		echo "Invalid parameter: $1"
++		exit 1
++		;;
++	esac
++
++	echo "$1:$val"
++	shift
++    done
++}
++
++do_check() {
++	case $1 in
++	    ip_addr_src)
++		# We only support static and dhcp IP address sources
++		case $2 in
++		    static)
++			;;
++		    dhcp)
++			;;
++		    *)
++			echo "Invalid ip_addr_src: $2"
++			exit 1
++			;;
++		esac
++		;;
++
++		ip_addr | subnet_mask | default_gw_ip_addr)
++		if [ "$2" != "`echo $2 | grep -E [0-9]\{1,3\}[.][0-9]\{1,3\}[.][0-9]\{1,3\}[.][0-9]\{1,3\}`" ];
++			then
++			echo "Invalid value $2 for parameter $1"
++			exit 1
++		fi
++		;;
++
++		mac_addr)
++		if [ "$2" != "`echo $2 | grep -E [[:xdigit:]]\{1,2\}[:][[:xdigit:]]\{1,2\}[:][[:xdigit:]]\{1,2\}[:][[:xdigit:]]\{1,2\}[:][[:xdigit:]]\{1,2\}[:][[:xdigit:]]\{1,2\}`" ];
++			then
++			echo "Invalid value $2 for parameter $1"
++			exit 1
++		fi
++		;;
++
++	    *)
++		echo "Invalid parameter: $parm"
++		exit 1
++		;;
++	esac
++}
++
++mask2cidr() {
++	nbits=0
++	IFS=.
++	for dec in $1 ; do
++		case $dec in
++			255) let nbits+=8;;
++			254) let nbits+=7;;
++			252) let nbits+=6;;
++			248) let nbits+=5;;
++			240) let nbits+=4;;
++			224) let nbits+=3;;
++			192) let nbits+=2;;
++			128) let nbits+=1;;
++			0);;
++			*) echo "Error: $dec is not recognized"; exit 1
++		esac
++	done
++	echo "$nbits"
++}
++
++do_set() {
++	if [ "x$1" = "x" ]
++	then
++		echo "no parameters given for set command - fail"
++		exit 1
++	fi
++	while [ "x$1" != "x" ]; do
++		parm="$1"
++		shift
++		if [ "x$1" = "x" ]; then
++			echo "No value present for parameter $parm"
++			exit 1
++		fi
++		val="$1"
++		shift
++
++		do_check $parm $val
++
++		case $parm in
++			ip_addr)
++				echo $val > /tmp/ip_addr
++				;;
++
++			ip_addr_src)
++				if [ $val == "dhcp" ]; then
++					rm -rf /etc/systemd/network/50-static.network
++					systemctl stop systemd-networkd
++					systemctl start systemd-networkd
++				else
++					if [ ! -f /etc/systemd/network/50-static.network ]; then
++						echo [Match] >> /etc/systemd/network/50-static.network
++						echo Name=$device >> /etc/systemd/network/50-static.network
++					fi
++				fi
++				;;
++
++			subnet_mask)
++				echo $(mask2cidr $val) > /tmp/subnet_mask
++				;;
++
++			default_gw_ip_addr)
++				echo $val > /tmp/default_gw_ip_addr
++				;;
++
++			mac_addr)
++				if [ -f /etc/systemd/network/50-static.network ]; then
++					sed -i '/\b\(Link\|MACAddress\)\b/d' /etc/systemd/network/50-static.network
++					echo [Link] >> /etc/systemd/network/50-static.network
++					echo MACAddress="$val" >> /etc/systemd/network/50-static.network
++					if [ -f /tmp/ip_addr ] && [ -f /tmp/subnet_mask ] && [ -f /tmp/default_gw_ip_addr ]
++					then
++						ifconfig $device down
++						systemctl stop systemd-networkd
++						systemctl start systemd-networkd
++						ifconfig $device down
++					fi
++				else
++					sed -i '/\b\(Link\|MACAddress\)\b/d' /usr/lib/systemd/network/default.network
++					echo [Link] >> /usr/lib/systemd/network/default.network
++					echo MACAddress="$val" >> /usr/lib/systemd/network/default.network
++					ifconfig $device down
++					systemctl stop systemd-networkd
++					systemctl start systemd-networkd
++					ifconfig $device up
++				fi
++				;;
++
++			*)
++				echo "Invalid parameter: $1"
++				exit 1
++				;;
++		esac
++	done
++
++	if [ ! -f /tmp/ip_addr ] || [ ! -f /tmp/subnet_mask ] || [ ! -f /tmp/default_gw_ip_addr ]
++	then
++		echo "no enaugh parameters given - fail"
++	else
++		tmp_ip_addr="$(</tmp/ip_addr)"
++		tmp_netmask="$(</tmp/subnet_mask)"
++		tmp_gateway="$(</tmp/default_gw_ip_addr)"
++		rm /tmp/ip_addr
++		rm /tmp/subnet_mask
++		rm /tmp/default_gw_ip_addr
++		sed -i '/\b\(Network\|Address\|Gateway\)\b/d' /etc/systemd/network/50-static.network
++
++		echo [Network] >> /etc/systemd/network/50-static.network
++		echo Address="$tmp_ip_addr"/"$tmp_netmask" >> /etc/systemd/network/50-static.network
++		echo Gateway="$tmp_gateway" >> /etc/systemd/network/50-static.network
++		systemctl stop systemd-networkd
++		systemctl start systemd-networkd
++	fi
++}
++
++case $op in
++    get)
++	do_get $@
++	;;
++    set)
++	do_set $@
++	;;
++
++    check)
++	do_check $@
++	;;
++
++*)
++	echo "Unknown operation: $op"
++	exit 1
++esac
+diff --git a/lanserv/mlxbw/mlxbw-hw-events.sh b/lanserv/mlxbw/mlxbw-hw-events.sh
+new file mode 100644
+index 00000000..c5c86c57
+--- /dev/null
++++ b/lanserv/mlxbw/mlxbw-hw-events.sh
+@@ -0,0 +1,56 @@
++#!/bin/bash
++
++########################################################################
++# Copyright (c) 2018 Mellanox Technologies.
++# Copyright (c) 2018 Diane Lynch <dianel@mellanox.com>
++#
++# Licensed under the GNU General Public License Version 2
++#
++# This program is free software; you can redistribute it and/or modify
++# it under the terms of the GNU General Public License as published by
++# the Free Software Foundation; either version 2 of the License, or
++# (at your option) any later version.
++#
++
++if [ "$1" == "add" ]; then
++  if [ "$2" == "buv_board" ] || [ "$2" == "bmc_card" ]; then
++    mkdir -p /bsp/thermal/
++    ln -sf $3$4/temp1_input /bsp/thermal/$2_temp
++    ln -sf $3$4/temp1_max /bsp/thermal/$2_temp_max
++    ln -sf $3$4/temp1_max_hyst /bsp/thermal/$2_temp_max_alarm
++  fi
++  if [ "$2" == "fan" ]; then
++    mkdir -p /bsp/fan/
++    ln -sf $3$4/fan1_input /bsp/fan/fan1_rpm
++    ln -sf $3$4/fan2_input /bsp/fan/fan2_rpm
++    ln -sf $3$4/fan3_input /bsp/fan/fan3_rpm
++    ln -sf $3$4/fan4_input /bsp/fan/fan4_rpm
++    ln -sf $3$4/pwm1 /bsp/fan/fan1_pwm
++    ln -sf $3$4/pwm2 /bsp/fan/fan2_pwm
++    ln -sf $3$4/pwm3 /bsp/fan/fan3_pwm
++    ln -sf $3$4/pwm4 /bsp/fan/fan4_pwm
++  fi
++  if [ "$2" == "eeprom_bmc" ]; then
++      mkdir -p /bsp/fru/
++      ln -sf $3$4/eeprom /bsp/fru/$2
++  fi
++elif [ "$1" == "rm" ]; then
++  if [ "$2" == "buv_board" ] || [ "$2" == "bmc_card" ]; then
++    unlink /bsp/thermal/$2_temp
++    unlink /bsp/thermal/$2_temp_max
++    unlink /bsp/thermal/$2_temp_max_alarm
++  fi
++  if [ "$2" == "fan" ]; then
++    unlink /bsp/fan/fan1_rpm
++    unlink /bsp/fan/fan2_rpm
++    unlink /bsp/fan/fan3_rpm
++    unlink /bsp/fan/fan4_rpm
++    unlink /bsp/fan/fan1_pwm
++    unlink /bsp/fan/fan2_pwm
++    unlink /bsp/fan/fan3_pwm
++    unlink /bsp/fan/fan4_pwm
++  fi
++  if [ "$2" == "eeprom_bmc" ]; then
++    unlink /bsp/fru/$2
++  fi
++fi
+diff --git a/lanserv/mlxbw/mlxbw.c b/lanserv/mlxbw/mlxbw.c
+new file mode 100644
+index 00000000..c4537c67
+--- /dev/null
++++ b/lanserv/mlxbw/mlxbw.c
+@@ -0,0 +1,729 @@
++/*
++ * mlxbw.c
++ *
++ * Mellanox Bluewhale BMC specific module for handling MC functions.
++ *
++ */
++
++#include <stdio.h>
++#include <stdlib.h>
++#include <errno.h>
++#include <string.h>
++#include <sys/time.h>
++#include <sys/ioctl.h>
++#include <unistd.h>
++#include <signal.h>
++#include <pthread.h>
++#include <sys/types.h>
++#include <sys/stat.h>
++#include <fcntl.h>
++#include <semaphore.h>
++#include <stdlib.h>
++
++#include <OpenIPMI/ipmi_err.h>
++#include <OpenIPMI/ipmi_msgbits.h>
++#include <OpenIPMI/ipmi_bits.h>
++#include <OpenIPMI/ipmi_mc.h>
++#include <OpenIPMI/serv.h>
++#include "../bmc.h"
++#include "../emu.h"
++
++static lmc_data_t *bmc_mc;
++
++/**************************************************************************
++ *                  Mellanox custom commands codes                        *
++ *************************************************************************/
++/* IPMI_APP_NETFN (0x06) */
++#define IPMI_OEM_MLX_SEL_BUFFER_SET_CMD     0x5b
++#define IPMI_OEM_MLX_CPU_HARD_RESET_CMD     0x5e
++#define IPMI_OEM_MLX_CPU_SOFT_RESET_CMD     0x5f
++
++#define IPMI_OEM_MLX_BMC_UPTIME_GET_CMD     0x63
++#define IPMI_OEM_MLX_LOG_TO_SEL_CMD         0x64
++
++#define IPMI_OEM_MLX_SEL_LOG_SIZE_MIN       0x40
++#define IPMI_OEM_MLX_SEL_LOG_SIZE_MAX       0x0fff
++
++/* Set sel log size script file path */
++#define SEL_SET_SCRIPT_NAME "sel_set_log_size.sh"
++
++
++
++
++/* Reset links */
++#define MLX_BMC_SOFT_RESET   "/bsp/reset/bmc_reset_soft"
++#define MLX_CPU_HARD_RESET   "/bsp/reset/cpu_reset_hard"
++#define MLX_CPU_SOFT_RESET   "/bsp/reset/cpu_reset_soft"
++#define MLX_SYS_HARD_RESET   "/bsp/reset/system_reset_hard"
++
++#define MLX_UPTIME_FILE      "/proc/uptime"
++
++#define	SYSTEM_RETURN_STATUS_OFFSET 8
++#define	BF_POWER_UNKNOWN_STATE      2
++
++#ifdef BLUEWHALE_RESET_CAUSE
++static const char* reset_cause[8] =
++{
++    "/bsp/reset/ac_power_cycle",
++    "/bsp/reset/dc_power_cycle",
++    "/bsp/reset/bmc_upgrade",
++    "/bsp/reset/cpu_kernel_panic",
++    "/bsp/reset/cpu_power_down",
++    "/bsp/reset/cpu_reboot",
++    "/bsp/reset/cpu_shutdown",
++    "/bsp/reset/cpu_watchdog"
++};
++
++enum reset_cause_e {
++    MLX_RESET_CAUSE_AC_POWER_CYCLE = 0,
++    MLX_RESET_CAUSE_DC_POWER_CYCLE,
++    MLX_RESET_CAUSE_BMC_UPGRADE,
++    MLX_RESET_CAUSE_CPU_KERNEL_PANIC,
++    MLX_RESET_CAUSE_CPU_POWER_DOWN,
++    MLX_RESET_CAUSE_CPU_REBOOT,
++    MLX_RESET_CAUSE_CPU_SHUTDOWN,
++    MLX_RESET_CAUSE_CPU_WATCHDOG,
++    MLX_RESET_CAUSE_BUTTON
++};
++#endif /* BLUEWHALE_RESET_CAUSE */
++
++/*
++ * This timer is called periodically to monitor the system reset cause.
++ */
++static ipmi_timer_t *reset_monitor_timer = NULL;
++#define MLX_RESET_MONITOR_TIMEOUT         10
++
++#define MLX_EVENT_TO_SEL_BUF_SIZE           13
++#define MLX_EVENT_DIRECTION_SHIFT           7
++
++static void
++mlx_add_event_to_sel(lmc_data_t    *mc,
++           unsigned char sensor_type,
++           unsigned char sensor_num,
++           unsigned char direction,
++           unsigned char event_type,
++           unsigned char offset)
++{
++    lmc_data_t    *dest_mc;
++    unsigned char data[MLX_EVENT_TO_SEL_BUF_SIZE];
++    int           rv;
++
++    rv = ipmi_emu_get_mc_by_addr(mc->emu, mc->event_receiver, &dest_mc);
++    if (rv)
++        return;
++
++    memset(data, 0, MLX_EVENT_TO_SEL_BUF_SIZE);
++
++    data[4] = mc->ipmb;
++    data[6] = 0x04; /* Event message revision for IPMI 2.0. */
++    data[7] = sensor_type;
++    data[8] = sensor_num;
++    data[9] = (direction << MLX_EVENT_DIRECTION_SHIFT) | event_type;
++    data[10] = offset;
++
++    mc_new_event(dest_mc, 0x02, data);
++}
++
++/**
++ *
++ *  ipmitool mc cold reset
++ *
++ **/
++static void
++handle_bmc_cold_reset(lmc_data_t    *mc,
++			  msg_t         *msg,
++			  unsigned char *rdata,
++			  unsigned int  *rdata_len,
++			  void          *cb_data)
++{
++    int retval = 0;
++    printf("bmc cold reset\n");
++
++    /* Use three calls to "devmem" to program WDT1 to do full chip reset */
++
++    /* Change WDT1 Counter Reload Value to be equivalent to 2 seconds */
++    retval |= system("/sbin/devmem 0x1e785004 l 0x1e8480");
++
++    /* Write magic value to WDT1 Counter Restart Value to trigger
++       reload of WDT1 Counter Reload Value */
++    retval |= system("/sbin/devmem 0x1e785008 l 0x4755");
++
++    /* Enable WDT1 Control Register to do full chip reset from default
++       boot code source (CS0 Flash bank) */
++    retval |= system("/sbin/devmem 0x1e78500C l 0x37");
++
++    rdata[0] = retval;
++    *rdata_len = 1;
++}
++
++
++/**
++ *
++ *  ipmitool raw 0x06 0x5c [0x0]
++ *
++ **/
++static void
++handle_cpu_ready_event(lmc_data_t    *mc,
++			  msg_t         *msg,
++			  unsigned char *rdata,
++			  unsigned int  *rdata_len,
++			  void          *cb_data)
++{
++    unsigned char status_led_run_str[32];
++    unsigned int ready;
++
++    printf("cpu ready event\n");
++    if (check_msg_length(msg, 1, rdata, rdata_len)) {
++        ready = 1;
++    }
++    else {
++        ready = msg->data[0];
++        if (ready != 0 ) {
++            rdata[0] = IPMI_INVALID_DATA_FIELD_CC;
++            *rdata_len = 1;
++            return;
++        }
++    }
++#ifdef BLUEWHALE_RESET_CAUSE
++   if (ready) {
++        /* set "Presence detected" if CPU started successfully */
++        system("echo 128 > /bsp/environment/cpu_status");
++   }
++   else {
++        /* set "IERR" in case something goes wrong on CPU sturtup */
++        system("echo 1 > /bsp/environment/cpu_status");
++   }
++#endif /* BLUEWHALE_RESET_CAUSE */
++    rdata[0] = 0;
++    *rdata_len = 1;
++}
++
++/**
++ *
++ *  ipmitool raw 0x06  0x5e [off/on] [0x1]
++ *
++ **/
++static void
++handle_cpu_hard_reset(lmc_data_t    *mc,
++			  msg_t         *msg,
++			  unsigned char *rdata,
++			  unsigned int  *rdata_len,
++			  void          *cb_data)
++{
++    printf("\n %d: %s, %s()", __LINE__, __FILE__, __FUNCTION__);
++
++    FILE *freset;
++    unsigned int reset;
++    unsigned char cpu_reboot_cmd = 0;
++
++    if (check_msg_length(msg, 1, rdata, rdata_len)) {
++        reset = 0;
++    }
++    else {
++        if (check_msg_length(msg, 2, rdata, rdata_len)) {
++            reset = msg->data[0];
++        }
++        else {
++            reset = msg->data[0];
++            cpu_reboot_cmd = msg->data[1];
++        }
++
++        if (reset > 1 || cpu_reboot_cmd > 1) {
++            rdata[0] = IPMI_INVALID_DATA_FIELD_CC;
++            *rdata_len = 1;
++            return;
++        }
++    }
++
++    freset = fopen(MLX_CPU_HARD_RESET, "w");
++
++    if (!freset) {
++            printf("\nUnable to open reset file");
++            rdata[0] = IPMI_COULD_NOT_PROVIDE_RESPONSE_CC;
++            *rdata_len = 1;
++            return;
++    } else {
++        fprintf(freset, "%u", reset);
++    }
++
++    fclose(freset);
++
++    if (!reset) {
++        if (cpu_reboot_cmd)
++            mlx_add_event_to_sel(mc, IPMI_SENSOR_TYPE_OS_CRITICAL_STOP , 40, 0, IPMI_EVENT_READING_TYPE_SENSOR_SPECIFIC, 0x3);
++        else
++            mlx_add_event_to_sel(mc, IPMI_SENSOR_TYPE_OS_CRITICAL_STOP , 0, 0, IPMI_EVENT_READING_TYPE_SENSOR_SPECIFIC, 0x3);
++
++    }
++
++    rdata[0] = 0;
++    *rdata_len = 1;
++}
++
++/**
++ *
++ *  ipmitool raw 0x06  0x5f [0x1]
++ *
++ **/
++static void
++handle_cpu_soft_reset(lmc_data_t    *mc,
++                      msg_t         *msg,
++                      unsigned char *rdata,
++                      unsigned int  *rdata_len,
++                      void          *cb_data)
++{
++    FILE *freset;
++    unsigned char cpu_reboot_cmd = 0;
++    printf("cpu soft reset\n");
++    if (!check_msg_length(msg, 1, rdata, rdata_len)) {
++        cpu_reboot_cmd = msg->data[0];
++        if (cpu_reboot_cmd != 1 ) {
++            rdata[0] = IPMI_INVALID_DATA_FIELD_CC;
++            *rdata_len = 1;
++            return;
++        }
++    }
++
++    freset = fopen(MLX_CPU_SOFT_RESET, "w");
++
++    if (!freset) {
++            printf("\nUnable to open reset file");
++            rdata[0] = IPMI_COULD_NOT_PROVIDE_RESPONSE_CC;
++            *rdata_len = 1;
++            return;
++    } else {
++        fprintf(freset, "%u", 0);
++    }
++
++    fclose(freset);
++
++    if (cpu_reboot_cmd) {
++        mlx_add_event_to_sel(mc, IPMI_SENSOR_TYPE_SYSTEM_BOOT_INITIATED, 40, 0, IPMI_EVENT_READING_TYPE_SENSOR_SPECIFIC, 0x7); 
++    }
++    else
++        mlx_add_event_to_sel(mc, IPMI_SENSOR_TYPE_SYSTEM_BOOT_INITIATED, 0, 0, IPMI_EVENT_READING_TYPE_SENSOR_SPECIFIC, 0x7); 
++
++    rdata[0] = 0;
++    *rdata_len = 1;
++}
++
++/**
++ *
++ *  ipmitool raw 0x06  0x5B size_LSB size_MSB
++ *
++ **/
++static void
++handle_sel_buffer_set(lmc_data_t    *mc,
++              msg_t         *msg,
++              unsigned char *rdata,
++              unsigned int  *rdata_len,
++              void          *cb_data)
++{
++    uint16_t max_entries = 0;
++    char sel_set_cmd_buf[100];
++
++    if (check_msg_length(msg, 2, rdata, rdata_len)){
++        return;
++    }
++
++    max_entries = msg->data[0] | (((uint16_t) msg->data[1]) << 8);
++
++    if ((max_entries < IPMI_OEM_MLX_SEL_LOG_SIZE_MIN) ||
++        (max_entries > IPMI_OEM_MLX_SEL_LOG_SIZE_MAX)){
++        rdata[0] = IPMI_INVALID_DATA_FIELD_CC;
++        *rdata_len = 1;
++        return;
++    }
++
++    snprintf(sel_set_cmd_buf, sizeof(sel_set_cmd_buf), "%s %d", SEL_SET_SCRIPT_NAME, max_entries);
++    rdata[0] = system(sel_set_cmd_buf);
++
++    ipmi_mc_enable_sel(mc, max_entries, mc->sel.flags);
++    *rdata_len = 1;
++}
++
++/**
++ *
++ *  ipmitool raw 0x04  0x15
++ *
++ **/
++static void handle_get_last_processed_event(lmc_data_t    *mc,
++              msg_t         *msg,
++              unsigned char *rdata,
++              unsigned int  *rdata_len,
++              void          *cb_data)
++{
++    sel_entry_t *entry;
++    sel_entry_t *p_entry = NULL;
++    int         offset;
++    int         count;
++
++    if (mc->sel.count == 0) {
++        rdata[0] = IPMI_NOT_PRESENT_CC;
++        *rdata_len = 1;
++        return;
++    }
++
++    entry = mc->sel.entries;
++    if (entry) {
++        while (entry->next) {
++            p_entry = entry;
++            entry = entry->next;
++            }
++    }
++
++    rdata[0] = 0;
++    rdata[1] = 0xff;
++    rdata[2] = 0xff;
++
++    ipmi_set_uint16(rdata+4, entry->record_id);
++    *rdata_len = 3;
++
++    offset = 0x00;
++    count = 0xff;
++
++    if ((offset+count) > 16)
++        count = 16 - offset;
++    memcpy(rdata+5, entry->data+offset, count);
++    *rdata_len = count + 5;
++}
++
++/*
++ * Chassis control for the chassis
++ */
++static int
++bmc_set_chassis_control(lmc_data_t *mc, int op, unsigned char *val,
++                        void *cb_data)
++{
++    FILE *freset;
++    int retval = 0;
++
++    switch (op) {
++    case CHASSIS_CONTROL_POWER:
++        if (*val)
++            retval = system("/usr/sbin/mlnx_poweron_bf");
++        else
++            retval = system("/usr/sbin/mlnx_poweroff_bf");
++        break;
++    case CHASSIS_CONTROL_BOOT_INFO_ACK:
++    case CHASSIS_CONTROL_BOOT:
++    case CHASSIS_CONTROL_GRACEFUL_SHUTDOWN:
++        break;
++    case CHASSIS_CONTROL_RESET:
++        retval = system("/usr/sbin/mlnx_powercycle_bf");
++        break;
++    default:
++        return EINVAL;
++    }
++
++    return retval;
++}
++
++/**
++ *
++ * ipmitool raw 0x06  0x63
++ *
++**/
++static void
++handle_bmc_uptime_get(lmc_data_t    *mc,
++                       msg_t         *msg,
++                       unsigned char *rdata,
++                       unsigned int  *rdata_len,
++                       void          *cb_data)
++{
++    unsigned char rv = 0;
++    char uptime[10];
++    unsigned int val = 0;
++    unsigned char seconds = 0;
++    unsigned char minutes = 0;
++    unsigned char hours = 0;
++    unsigned char days = 0;
++    FILE *fuptime;
++    sys_data_t *sys = cb_data;
++
++    memset(uptime, 0, sizeof(uptime));
++    fuptime = fopen(MLX_UPTIME_FILE, "r");
++
++    if (!fuptime) {
++        sys->log(sys, OS_ERROR, NULL,"Unable to open  uptime file");
++        rdata[0] = IPMI_COULD_NOT_PROVIDE_RESPONSE_CC;
++        *rdata_len = 1;
++        return;
++    }
++
++    fscanf(fuptime, "%s", uptime);
++    val = strtoul(uptime, NULL, 0);
++
++    fclose(fuptime);
++
++    seconds = val%60;
++    days = (val - seconds)/86400; /* 60*60*24 */
++    hours = (val - seconds)/3600 - days*24;
++    minutes = (val - seconds)/60 - (hours*60 + days*24*60);
++
++    rdata[0] = 0;
++    rdata[1] = days;
++    rdata[2] = hours;
++    rdata[3] = minutes;
++    rdata[4] = seconds;
++    *rdata_len = 5;
++    return;
++}
++
++/**
++ *
++ * ipmitool raw 0x06  0x64 [sdr_type] [direction] [event_type]
++ *
++**/
++static void
++handle_log_to_sel(lmc_data_t    *mc,
++                  msg_t         *msg,
++                  unsigned char *rdata,
++                  unsigned int  *rdata_len,
++                  void          *cb_data)
++{
++    unsigned char sdr_type;
++    unsigned char direction;
++    unsigned char event_type;
++
++    if (check_msg_length(msg, 3, rdata, rdata_len)) {
++        return;
++    }
++
++    sdr_type = msg->data[0];
++    direction = msg->data[1];
++    event_type = msg->data[2];
++
++    mlx_add_event_to_sel(mc, sdr_type , 0, direction, IPMI_EVENT_READING_TYPE_SENSOR_SPECIFIC, event_type);
++
++    rdata[0] = 0;
++    *rdata_len = 1;
++    return;
++}
++
++static void
++reset_monitor_timeout(void *cb_data)
++{
++    sys_data_t *sys = cb_data;
++    int i;
++    struct timeval tv;
++    int fd;
++    int rv;
++#ifdef BLUEWHALE_RESET_CAUSE
++    for (i = 0; i < 8; ++i) {
++        unsigned char c = 0;
++        int active = 0;
++
++        fd = open(reset_cause[i], O_RDONLY);
++
++        rv = read(fd, &c, 1);
++        if (rv != 1) {
++            sys->log(sys, OS_ERROR, NULL, "Warning: failed to read '%s' file", reset_cause[i]);
++            continue;
++        }
++
++        active = atoi(&c);
++        if (active) {
++            switch (i) {
++            case MLX_RESET_CAUSE_AC_POWER_CYCLE:
++                //"Power Unit", "Power cycle"
++                mlx_add_event_to_sel(sys->mc, IPMI_SENSOR_TYPE_POWER_UNIT, 0 , 0, IPMI_EVENT_READING_TYPE_SENSOR_SPECIFIC, 0x1);
++                break;
++            case MLX_RESET_CAUSE_DC_POWER_CYCLE:
++                //"System Event", "OEM System boot event"
++                mlx_add_event_to_sel(sys->mc, IPMI_SENSOR_TYPE_SYSTEM_EVENT, 0 , 0, IPMI_EVENT_READING_TYPE_SENSOR_SPECIFIC, 0x1);
++                break;
++            case MLX_RESET_CAUSE_BMC_UPGRADE:
++                //"Version Change", "Firmware or software change success"
++                mlx_add_event_to_sel(sys->mc, IPMI_SENSOR_TYPE_VERSION_CHANGE, 0 , 0, IPMI_EVENT_READING_TYPE_SENSOR_SPECIFIC, 0x7);
++                break;
++            case MLX_RESET_CAUSE_CPU_KERNEL_PANIC:
++                //"System Firmware Error", "Unknown Error"
++                mlx_add_event_to_sel(sys->mc, IPMI_SENSOR_TYPE_SYSTEM_FIRMWARE_PROGRESS, 0 , 0, IPMI_EVENT_READING_TYPE_SENSOR_SPECIFIC, 0x0);
++                break;
++            case MLX_RESET_CAUSE_CPU_POWER_DOWN:
++                //"Power Unit", "Power off/down"
++                mlx_add_event_to_sel(sys->mc, IPMI_SENSOR_TYPE_POWER_UNIT, 0 , 0, IPMI_EVENT_READING_TYPE_SENSOR_SPECIFIC, 0x0);
++                break;
++            case MLX_RESET_CAUSE_CPU_REBOOT:
++                //"System Boot Initiated", "System Restart" 
++                mlx_add_event_to_sel(sys->mc, IPMI_SENSOR_TYPE_SYSTEM_BOOT_INITIATED, 0 , 0, IPMI_EVENT_READING_TYPE_SENSOR_SPECIFIC, 0x7);
++                break;
++
++            case MLX_RESET_CAUSE_CPU_SHUTDOWN:
++                //"OS Stop/Shutdown", "OS graceful shutdown"
++                mlx_add_event_to_sel(sys->mc, IPMI_SENSOR_TYPE_OS_CRITICAL_STOP, 0 , 0, IPMI_EVENT_READING_TYPE_SENSOR_SPECIFIC, 0x3);
++                break;
++            case MLX_RESET_CAUSE_CPU_WATCHDOG:
++                //"Watchdog 2", "Power cycle"
++                mlx_add_event_to_sel(sys->mc, IPMI_SENSOR_TYPE_WATCHDOG_2, 0 , 0, IPMI_EVENT_READING_TYPE_SENSOR_SPECIFIC, 0x3);
++                break;
++            case MLX_RESET_CAUSE_BUTTON:
++                //"Button", "Reset Button pressed"
++                mlx_add_event_to_sel(sys->mc, IPMI_SENSOR_TYPE_BUTTON, 0 , 0, IPMI_EVENT_READING_TYPE_SENSOR_SPECIFIC, 0x2);
++                break;
++            }
++        }
++        close(fd);
++}
++#endif /* BLUEWHALE_RESET_CAUSE */
++
++    tv.tv_sec = MLX_RESET_MONITOR_TIMEOUT;
++    tv.tv_usec = 0;
++    sys->start_timer(reset_monitor_timer, &tv);
++}
++
++/*
++ * Chassis control get for the chassis.
++ */
++static int
++bmc_get_chassis_control(lmc_data_t *mc, int op, unsigned char *val,
++			void *cb_data)
++{
++    if (op == CHASSIS_CONTROL_POWER) {
++	int rval = 0;
++	rval = system("/usr/sbin/mlnx_powerstatus_bf");
++	rval = (unsigned char)(rval >> SYSTEM_RETURN_STATUS_OFFSET);
++
++	if (rval == BF_POWER_UNKNOWN_STATE)
++		return EINVAL;
++
++	*val = rval;
++	return 0;
++    }
++
++    /* This doesn't make sense for anything else */
++    return EINVAL;
++}
++
++int
++ipmi_sim_module_print_version(sys_data_t *sys, char *initstr)
++{
++    printf("IPMI Simulator Mellanox module version 0.1\n");
++    return 0;
++}
++
++/**************************************************************************
++ * Module initialization
++ *************************************************************************/
++/**
++ *
++ * This is used to initialize the module.  It is called after the
++ * configuration has been read from the LAN configuration file, but
++ * before the *.hw commands are run.
++ *
++ **/
++int
++ipmi_sim_module_init(sys_data_t *sys, const char *initstr_i)
++{
++    int rv;
++    unsigned int i;
++    struct timeval tv;
++
++    printf("IPMI Mellanox module Bluewhale %s\n", initstr_i);
++  
++    rv = ipmi_mc_alloc_unconfigured(sys, 0x20, &bmc_mc);
++    if (rv) {
++	sys->log(sys, OS_ERROR, NULL,
++		 "Unable to allocate an mc: %s", strerror(rv));
++	return rv;
++    }
++
++    rv = ipmi_emu_register_cmd_handler(IPMI_APP_NETFN, IPMI_COLD_RESET_CMD,
++                                       handle_bmc_cold_reset, sys);
++
++    rv = ipmi_emu_register_cmd_handler(IPMI_APP_NETFN, IPMI_OEM_MLX_SEL_BUFFER_SET_CMD,
++                                       handle_sel_buffer_set, sys);
++
++    rv = ipmi_emu_register_cmd_handler(IPMI_SENSOR_EVENT_NETFN, IPMI_GET_LAST_PROCESSED_EVENT_ID_CMD,
++                                       handle_get_last_processed_event, sys);
++
++    rv = ipmi_emu_register_cmd_handler(IPMI_APP_NETFN, IPMI_OEM_MLX_BMC_UPTIME_GET_CMD,
++                                       handle_bmc_uptime_get, sys);
++
++    rv = ipmi_emu_register_cmd_handler(IPMI_APP_NETFN, IPMI_OEM_MLX_LOG_TO_SEL_CMD,
++                                       handle_log_to_sel, sys);
++
++    ipmi_mc_set_chassis_control_func(bmc_mc, bmc_set_chassis_control,
++                                     bmc_get_chassis_control, sys);
++
++    if (rv) {
++	sys->log(sys, OS_ERROR, NULL,
++		 "Unable to register NEW handler: %s", strerror(rv));
++    }
++
++    rv = sys->alloc_timer(sys, reset_monitor_timeout, sys, &reset_monitor_timer);
++    if (rv) {
++        int errval = errno;
++        sys->log(sys, SETUP_ERROR, NULL, "Unable to create reset monitoring timer");
++        return errval;
++    } else {
++        tv.tv_sec = MLX_RESET_MONITOR_TIMEOUT;
++        tv.tv_usec = 0;
++        sys->start_timer(reset_monitor_timer, &tv);
++    }
++#ifdef BLUEWHALE_RESET_CAUSE
++    /* set "Disabled" state at startup */
++    system("echo 256 > /bsp/environment/cpu_status");
++#endif
++
++    return 0;
++}
++
++/**
++ * This is called after the emulator command file is run. This
++ * can be used to finish up configuration of things, add
++ * functions to sensors, do any sensor initialization, or
++ * anything else that needs to be done after the emulator
++ * commands are run.
++**/
++int
++ipmi_sim_module_post_init(sys_data_t *sys)
++{
++    unsigned int fw_maj = 0;
++    unsigned int fw_min = 0;
++    unsigned char id_line[50];
++    unsigned char id_maj[2];
++    unsigned char id_min[2];
++    unsigned int  productId;
++    struct timeval tv;
++    int rv;
++    FILE *fid;
++
++    memset(id_line, 0, sizeof(id_line));
++    memset(id_min, 0, sizeof(id_min));
++    memset(id_maj, 0, sizeof(id_maj));
++
++    system("grep BUILD_ID /etc/os-release > /tmp/release");
++    fid = fopen("/tmp/release", "r");
++
++    if (!fid) {
++        sys->log(sys, OS_ERROR, NULL, "Unable to open  FW ID file");
++        return 0;
++    }
++
++    if (0 >= fread(id_line, 1, sizeof(id_line),fid))
++    {
++        fclose(fid);
++        sys->log(sys, OS_ERROR, NULL, "Unable to read  FW ID file");
++        return 0;
++    }
++
++    fclose(fid);
++ 
++
++    memcpy(id_maj, id_line+10, 1);
++    memcpy(id_min, id_line+12, 1);
++    sys->log(sys, OS_ERROR, NULL, "maj:%s min:%s idline:%s ", id_maj, id_min, id_line);
++
++    fw_maj = strtoul(id_maj, NULL, 0);
++    fw_min = strtoul(id_min, NULL, 0);
++
++    sys->log(sys, OS_ERROR, NULL, "FW Version %d %d", fw_maj, fw_min);
++
++    ipmi_mc_set_fw_revision(bmc_mc, fw_maj, fw_min);
++
++    productId = (sys->mc->product_id[1] << 8) | sys->mc->product_id[0];
++
++    return 0;
++}
+diff --git a/lanserv/mlxbw/mlxbw.hw b/lanserv/mlxbw/mlxbw.hw
+new file mode 100644
+index 00000000..f17572f1
+--- /dev/null
++++ b/lanserv/mlxbw/mlxbw.hw
+@@ -0,0 +1,76 @@
++########################################################################
++# Copyright (c) 2018 Mellanox Technologies.
++# Copyright (c) 2018 Diane Lynch <dianel@mellanox.com>
++#
++# Licensed under the GNU General Public License Version 2
++#
++# This program is free software; you can redistribute it and/or modify
++# it under the terms of the GNU General Public License as published by
++# the Free Software Foundation; either version 2 of the License, or
++# (at your option) any later version.
++#
++
++#
++# HW configuration file for the Mellanox BMC
++#
++
++# The BMC is the MC at address 20
++mc_setbmc 0x20
++
++
++#Product ID:
++# 2 - Bluewhale BMC
++
++# Now add the BMC
++#      IPMB DevID DevSDRs?       Rev   Maj   Min   Dev   MFG      Prod
++#                                      FW    FW    Sup   ID       Id
++#                                      Rev   Rev
++# MFG ID is the IANA.org number - 33049 for MLNX
++mc_add 0x20 1 has-device-sdrs  0x01  0x00  0x00  0x9f  0x008119 0x0002 persist_sdr
++
++#Enable SEL device
++sel_enable 0x20 1000 0x0a
++
++##################################################################################
++# Temperature Monitoring
++#          MC LUN Sens# type reading
++
++# Bluefield inlet board Temp
++sensor_add 0x20  0    1     1     1 \
++	poll 5000 \
++	file "/bsp/thermal/buv_board_temp" sub=-128000 div=1000
++
++sensor_add 0x20  0    2     1     1 \
++	poll 5000 \
++	file "/bsp/thermal/bmc_card_temp" sub=-128000  div=1000
++##################################################################################
++# Fan Monitoring
++#          MC LUN Sens# type reading
++#Fan1 
++sensor_add 0x20 0 3 4 1\
++        poll 5000 \
++        file "/bsp/fan/fan1_rpm" div=100
++
++#Fan2
++sensor_add 0x20 0 4 4 1\
++        poll 5000 \
++        file "/bsp/fan/fan2_rpm" div=100
++
++#Fan3
++sensor_add 0x20 0 5 4 1\
++        poll 5000 \
++        file "/bsp/fan/fan3_rpm" div=100
++
++#Fan4
++sensor_add 0x20 0 6 4 1\
++        poll 5000 \
++        file "/bsp/fan/fan4_rpm" div=100
++
++###################################################################
++# EEPROMS
++mc_add_fru_data 0x20 0 1024 \
++  file 0 "/bsp/fru/eeprom_bmc"
++
++###################################################################
++# Turn on the BMC
++mc_enable 0x20
+diff --git a/lanserv/mlxbw/mlxbw.lan.conf b/lanserv/mlxbw/mlxbw.lan.conf
+new file mode 100644
+index 00000000..374e95b8
+--- /dev/null
++++ b/lanserv/mlxbw/mlxbw.lan.conf
+@@ -0,0 +1,81 @@
++########################################################################
++# Copyright (c) 2018 Mellanox Technologies.
++# Copyright (c) 2018 Diane Lynch <dianel@mellanox.com>
++#
++# Licensed under the GNU General Public License Version 2
++#
++# This program is free software; you can redistribute it and/or modify
++# it under the terms of the GNU General Public License as published by
++# the Free Software Foundation; either version 2 of the License, or
++# (at your option) any later version.
++#
++
++# mellanox.lan.conf
++# A configuration file for lanserv to configure the various
++# communication parameters for the device.
++
++# This is a name used to identify this instance, and used to create
++# the default name of the emulator startup command file and eventually
++# the storage facility for permanent storage.
++name "mlxbw"
++
++#
++# Work on the BMC first
++set_working_mc 0x20
++
++  # Define a LAN channel on channel 1
++  startlan 1
++    # Define an IP address and port to listen on.  You can define more
++    # than one address/port to listen on multiple addresses.  The ::
++    # listens on all addresses.
++    addr 0.0.0.0 623
++
++    # Maximum privilege limit on the channel.
++    priv_limit admin
++
++    # Allowed IPMI 1.5 authorization types
++    #allowed_auths_callback none md2 md5 straight
++    #allowed_auths_user none md2 md5 straight
++    #allowed_auths_operator none md2 md5 straight
++    #allowed_auths_admin none md2 md5 straight
++
++    # guid for IPMI 2.0 authorization  You can also use a string
++    guid "guidforauthorization"
++
++    # You can specify a BMC key for IPMI 2.0 authorization.  See the
++    # spec for details.
++    #bmc_key "abcdefghijklmnopqrst"
++
++    # A program to get and set the LAN configuration of the interface.
++    lan_config_program "/etc/ipmi/lancontrol eth1"
++  endlan
++
++  #chassis_control "./ipmi_sim_chassiscontrol 0x20"
++
++  #sol "telnet:0.0.0.0:9012" 115200
++
++  # Start startcmd at startup?  Default is false.
++  startnow false
++
++  # Now add some users.  User 0 is invalid, user 1 is the special "anonymous"
++  # user and cannot take a username.  Note that the users here are only
++  # used if the persistent user config doesn't exist.
++  #    # valid name      passw  priv-lim max-sess allowed-auths
++  user 1 true  ""        "test" user     10       none md2 md5 straight
++  user 2 true  "root" "0penBmc" admin    10       md2 md5 straight
++
++  sol "/dev/ttyS2" 115200 nortscts history=65530 historyfru=10
++
++  # ipmb is only enabled when the ipmb_dev_int driver is loaded
++  # by the obmc-mellanox-ipmbd.sh script
++#  ipmb 12 ipmb_dev_int /dev/ipmb-12
++
++#  serial bt localhost 9012 codec BT_Mode
++
++# Dynamically load a module to extend the simulator.  After the module is
++# loaded, if the function "ipmi_sim_module_init" is defined in the module,
++# it will be called with the following parameters:
++#  int ipmi_sim_module_init(sys_data_t *sys, char *initstr);
++# where initstr is the init string passed on the module load line.
++# It should return 0 on success or an errno no failure.
++loadlib "/usr/lib/mlx_ipmid/mlxbw.so" ""
+diff --git a/lanserv/mlxbw/mlxbw.sdr b/lanserv/mlxbw/mlxbw.sdr
+new file mode 100644
+index 00000000..7a11fe22
+--- /dev/null
++++ b/lanserv/mlxbw/mlxbw.sdr
+@@ -0,0 +1,305 @@
++########################################################################
++# Copyright (c) 2018 Mellanox Technologies.
++# Copyright (c) 2018 Diane Lynch <dianel@mellanox.com>
++#
++# Licensed under the GNU General Public License Version 2
++#
++# This program is free software; you can redistribute it and/or modify
++# it under the terms of the GNU General Public License as published by
++# the Free Software Foundation; either version 2 of the License, or
++# (at your option) any later version.
++#
++# Table 43- in the IPMI v2.0 spec provides the best line for line
++# explanation of these SDR type 1 values.
++# Most of the 'non-intuitive' values are a result of IPMI requiring "raw"
++# values in the SDR record.
++# For example, if a nominal value is "30", the SDR record nominal_reading
++# value must be x in the Mx+b formula, applying the M and B out of SDR entry.
++# For sensor_maximim to be "Unspecified", it needs to evaluate to 0 after
++# the Mx+b formulat is applied.
++########################################################################
++########################################################################
++# Temperatures
++########################################################################
++########################################################################
++#BUV board temp sensor
++sdr type 1
++        sensor_owner_id         0x20
++        sensor_owner_lun        0
++        channel_number          0
++        sensor_number           1
++        entity_id               system_board
++        entity_instance         1
++        sensor_type             Temperature
++        event_reading_type_code 1
++        init_scanning           true
++        init_events             true
++        init_thresholds         true
++        init_hysteresis         true
++        init_sensor_type        true
++        default_event_gen_on    true
++        default_sensor_scan_on  true
++        sensor_auto_rearm       true
++        sensor_event_msg_ctrl   per_state
++        sensor_threshold_access settable
++        return_lnc              true
++        return_lc               true
++        return_unc              true
++        return_uc               true
++        deassert_lncgl          true
++        deassert_uncgh          true
++        deassert_lcgl           true
++        deassert_ucgh           true
++        assert_lncgl            true
++        assert_uncgh            true
++        assert_lcgl             true
++        assert_ucgh             true
++        lnc_thrsh_settable      true
++        unc_thrsh_settable      true
++        lc_thrsh_settable       true
++        uc_thrsh_settable       true
++        lnc_thrsh_readable      true
++        unc_thrsh_readable      true
++        lc_thrsh_readable       true
++        uc_thrsh_readable       true
++        base_unit               degrees_C
++        analog_data_format      unsigned
++        linearization           linear
++        sensor_direction        input
++        nominal_specified       true
++        nominal_reading         159
++        sensor_maximum          128
++        sensor_minimum          0
++        m                       1
++        b                       -128
++        r_exp                   0
++        b_exp                   0
++        lc_fthresh              10
++        lnc_fthresh             15
++        unc_fthresh             45
++        uc_fthresh              50
++        positive_hysteresis     1
++        negative_hysteresis     1
++        id_string               "buv_board"
++endsdr
++########################################################################
++#BMC Board temp sensor
++sdr type 1
++        sensor_owner_id         0x20
++        sensor_owner_lun        0
++        channel_number          0
++        sensor_number           2
++        entity_id               system_board
++        entity_instance         1
++        sensor_type             Temperature
++        event_reading_type_code 1
++        init_scanning           true
++        init_events             true
++        init_thresholds         true
++        init_hysteresis         true
++        init_sensor_type        true
++        default_event_gen_on    true
++        default_sensor_scan_on  true
++        sensor_auto_rearm       true
++        sensor_event_msg_ctrl   per_state
++        sensor_threshold_access settable
++        return_lnc              true
++        return_lc               true
++        return_unc              true
++        return_uc               true
++        deassert_lncgl          true
++        deassert_uncgh          true
++        deassert_lcgl           true
++        deassert_ucgh           true
++        assert_lncgl            true
++        assert_uncgh            true
++        assert_lcgl             true
++        assert_ucgh             true
++        lnc_thrsh_settable      true
++        unc_thrsh_settable      true
++        lc_thrsh_settable       true
++        uc_thrsh_settable       true
++        lnc_thrsh_readable      true
++        unc_thrsh_readable      true
++        lc_thrsh_readable       true
++        uc_thrsh_readable       true
++        base_unit               degrees_C
++        analog_data_format      unsigned
++        linearization           linear
++        sensor_direction        input
++        nominal_specified       true
++        nominal_reading         159
++        sensor_maximum          128
++        sensor_minimum          0
++        m                       1
++        b                       -128
++        r_exp                   0
++        b_exp                   0
++        lc_fthresh              10
++        lnc_fthresh             15
++        unc_fthresh             45
++        uc_fthresh              50
++        positive_hysteresis     1
++        negative_hysteresis     1
++        id_string               "bmc_card"
++endsdr
++#fan1 sensor
++sdr type 1
++        sensor_owner_id         0x20
++        sensor_owner_lun        0
++        channel_number          0
++        sensor_number           3
++        entity_id               fan_cooling_device
++        entity_instance         3
++        init_events             true
++        init_thresholds         true
++        init_hysteresis         true
++        init_scanning           true
++        init_sensor_type        true
++        default_event_gen_on    true
++        default_sensor_scan_on  true
++        sensor_auto_rearm       true
++        sensor_event_msg_ctrl   per_state
++        sensor_threshold_access settable
++        event_reading_type_code 1
++        sensor_type             Fan
++        return_lc               true
++        deassert_lcgl           true
++        assert_lcgl             true
++        lc_thrsh_readable       true
++        base_unit               RPM
++        r_exp                   0
++        b_exp                   0
++        b                       0
++        m                       100
++        nominal_specified       true
++        nominal_freading        11000
++        accuracy                5
++        accuracy_exp            0
++        sensor_maximum          0
++        sensor_minimum          0
++        lc_fthresh              500
++        positive_hysteresis     2
++        negative_hysteresis     2
++        id_string               "fan1_rpm"
++endsdr
++#fan2 sensor
++sdr type 1
++        sensor_owner_id         0x20
++        sensor_owner_lun        0
++        channel_number          0
++        sensor_number           4
++        entity_id               fan_cooling_device
++        entity_instance         3
++        init_events             true
++        init_thresholds         true
++        init_hysteresis         true
++        init_scanning           true
++        init_sensor_type        true
++        default_event_gen_on    true
++        default_sensor_scan_on  true
++        sensor_auto_rearm       true
++        sensor_event_msg_ctrl   per_state
++        sensor_threshold_access settable
++        event_reading_type_code 1
++        sensor_type             Fan
++        return_lc               true
++        deassert_lcgl           true
++        assert_lcgl             true
++        lc_thrsh_readable       true
++        base_unit               RPM
++        r_exp                   0
++        b_exp                   0
++        b                       0
++        m                       100
++        nominal_specified       true
++        nominal_freading        11000
++        accuracy                5
++        accuracy_exp            0
++        sensor_maximum          0
++        sensor_minimum          0
++        lc_fthresh              500
++        positive_hysteresis     2
++        negative_hysteresis     2
++        id_string               "fan2_rpm"
++endsdr
++#fan3 sensor
++sdr type 1
++        sensor_owner_id         0x20
++        sensor_owner_lun        0
++        channel_number          0
++        sensor_number           5
++        entity_id               fan_cooling_device
++        entity_instance         3
++        init_events             true
++        init_thresholds         true
++        init_hysteresis         true
++        init_scanning           true
++        init_sensor_type        true
++        default_event_gen_on    true
++        default_sensor_scan_on  true
++        sensor_auto_rearm       true
++        sensor_event_msg_ctrl   per_state
++        sensor_threshold_access settable
++        event_reading_type_code 1
++        sensor_type             Fan
++        return_lc               true
++        deassert_lcgl           true
++        assert_lcgl             true
++        lc_thrsh_readable       true
++        base_unit               RPM
++        r_exp                   0
++        b_exp                   0
++        b                       0
++        m                       100
++        nominal_specified       true
++        nominal_freading        11000
++        accuracy                5
++        accuracy_exp            0
++        sensor_maximum          0
++        sensor_minimum          0
++        lc_fthresh              500
++        positive_hysteresis     2
++        negative_hysteresis     2
++        id_string               "fan3_rpm"
++endsdr
++#fan4 sensor
++sdr type 1
++        sensor_owner_id         0x20
++        sensor_owner_lun        0
++        channel_number          0
++        sensor_number           6
++        entity_id               fan_cooling_device
++        entity_instance         3
++        init_events             true
++        init_thresholds         true
++        init_hysteresis         true
++        init_scanning           true
++        init_sensor_type        true
++        default_event_gen_on    true
++        default_sensor_scan_on  true
++        sensor_auto_rearm       true
++        sensor_event_msg_ctrl   per_state
++        sensor_threshold_access settable
++        event_reading_type_code 1
++        sensor_type             Fan
++        return_lc               true
++        deassert_lcgl           true
++        assert_lcgl             true
++        lc_thrsh_readable       true
++        base_unit               RPM
++        r_exp                   0
++        b_exp                   0
++        b                       0
++        m                       100
++        nominal_specified       true
++        nominal_freading        11000
++        accuracy                5
++        accuracy_exp            0
++        sensor_maximum          0
++        sensor_minimum          0
++        lc_fthresh              500
++        positive_hysteresis     2
++        negative_hysteresis     2
++        id_string               "fan4_rpm"
++endsdr
+\ No newline at end of file
+diff --git a/lanserv/mlxbw/sdr.20.main b/lanserv/mlxbw/sdr.20.main
+new file mode 100644
+index 00000000..55d6059a
+--- /dev/null
++++ b/lanserv/mlxbw/sdr.20.main
+@@ -0,0 +1,7 @@
++last_add_time:i:1568144766
++6:d:\06\00Q\013 \00\06\1d\03\7fH\04\01\04 \04\00\02\00\00\12\00\00d\00\00\05\00\00\01n\00\00\00\00\00\00\00\00\05\00\02\02\00\00\00\c8fan4_rpm
++5:d:\05\00Q\013 \00\05\1d\03\7fH\04\01\04 \04\00\02\00\00\12\00\00d\00\00\05\00\00\01n\00\00\00\00\00\00\00\00\05\00\02\02\00\00\00\c8fan3_rpm
++4:d:\04\00Q\013 \00\04\1d\03\7fH\04\01\04 \04\00\02\00\00\12\00\00d\00\00\05\00\00\01n\00\00\00\00\00\00\00\00\05\00\02\02\00\00\00\c8fan2_rpm
++3:d:\03\00Q\013 \00\03\1d\03\7fH\04\01\04 \04\00\02\00\00\12\00\00d\00\00\05\00\00\01n\00\00\00\00\00\00\00\00\05\00\02\02\00\00\00\c8fan1_rpm
++2:d:\02\00Q\013 \00\02\07\01\7fH\01\01\852\852\1b\1b\00\01\00\00\01\00\80\c0\01\00\01\9f\00\00\80\00\00\b2\ad\00\8a\8f\01\01\00\00\00\c8bmc_card
++1:d:\01\00Q\014 \00\01\07\01\7fH\01\01\852\852\1b\1b\00\01\00\00\01\00\80\c0\01\00\01\9f\00\00\80\00\00\b2\ad\00\8a\8f\01\01\00\00\00\c9buv_board
+\ No newline at end of file
+diff --git a/lanserv/mlxbw/sel_set_log_size.sh b/lanserv/mlxbw/sel_set_log_size.sh
+new file mode 100644
+index 00000000..a6e1e3a9
+--- /dev/null
++++ b/lanserv/mlxbw/sel_set_log_size.sh
+@@ -0,0 +1,21 @@
++#!/bin/bash
++
++########################################################################
++# Copyright (c) 2018 Mellanox Technologies.
++# Copyright (c) 2018 Diane Lynch <dianel@mellanox.com>
++#
++# Licensed under the GNU General Public License Version 2
++#
++# This program is free software; you can redistribute it and/or modify
++# it under the terms of the GNU General Public License as published by
++# the Free Software Foundation; either version 2 of the License, or
++# (at your option) any later version.
++#
++
++H_SIZE=$1
++
++if [ $H_SIZE -gt 4095 ] || [ $H_SIZE -lt 64 ]; then
++        echo "Invalid range. Value must be in range 64-4095\n"
++else
++        sed -i'' "s/^sel_enable \([0-9x]*\) [^ ]* \([0-9x]*\)/sel_enable \1 $H_SIZE \2/g" /etc/ipmi/mlxbw.hw
++fi
+diff --git a/sample/ipmi_serial_bmc_emu.c b/sample/ipmi_serial_bmc_emu.c
+index e0ae0197..1b8bb9ac 100644
+--- a/sample/ipmi_serial_bmc_emu.c
++++ b/sample/ipmi_serial_bmc_emu.c
+@@ -42,7 +42,7 @@
+ #include <unistd.h>
+ #include <stdlib.h>
+ #include <sys/select.h>
+-#include <editline/readline.h>
++#include <readline/readline.h>
+ 
+ #define _GNU_SOURCE
+ #include <getopt.h>
+diff --git a/tcl/Makefile.am b/tcl/Makefile.am
+index e31d1ef8..f72443c6 100644
+--- a/tcl/Makefile.am
++++ b/tcl/Makefile.am
+@@ -11,7 +11,7 @@ libOpenIPMItcl_la_SOURCES = tcl_os_hnd.c
+ libOpenIPMItcl_la_CFLAGS = $(AM_CFLAGS)
+ libOpenIPMItcl_la_LIBADD = $(GDBM_LIB)
+ libOpenIPMItcl_la_LDFLAGS = -rdynamic -version-info $(LD_VERSION) \
+-	$(TCL_LIBS) -rpath $(libdir)
++	$(TCL_LIBS)
+ 
+ noinst_PROGRAMS = test_handlers
+ 
+diff --git a/unix/Makefile.am b/unix/Makefile.am
+index 5128839d..517069ff 100644
+--- a/unix/Makefile.am
++++ b/unix/Makefile.am
+@@ -10,24 +10,10 @@ lib_LTLIBRARIES = libOpenIPMIposix.la libOpenIPMIpthread.la
+ libOpenIPMIpthread_la_SOURCES = posix_thread_os_hnd.c selector.c
+ libOpenIPMIpthread_la_LIBADD = -lpthread $(GDBM_LIB) \
+ 	$(top_builddir)/utils/libOpenIPMIutils.la $(RT_LIB)
+-libOpenIPMIpthread_la_LDFLAGS = -rdynamic -version-info $(LD_VERSION) \
+-	-L$(libdir)
++libOpenIPMIpthread_la_LDFLAGS = -rdynamic -version-info $(LD_VERSION)
+ 
+ libOpenIPMIposix_la_SOURCES = posix_os_hnd.c selector.c
+ libOpenIPMIposix_la_LIBADD = $(top_builddir)/utils/libOpenIPMIutils.la \
+ 	$(GDBM_LIB) $(RT_LIB)
+ libOpenIPMIposix_la_LDFLAGS = -rdynamic -version-info $(LD_VERSION) \
+-	-L$(libdir)
+-
+-noinst_HEADERS = heap.h
+-
+-noinst_PROGRAMS = test_heap test_handlers
+-
+-test_heap_SOURCES = test_heap.c
+-test_heap_LDADD = 
+-
+-test_handlers_SOURCES = test_handlers.c
+-test_handlers_LDADD = libOpenIPMIposix.la libOpenIPMIpthread.la \
+-	$(top_builddir)/utils/libOpenIPMIutils.la $(GDBM_LIB)
+-
+-TESTS = test_heap test_handlers
++	$(GLIB_LIBS)
+-- 
+2.25.1
+

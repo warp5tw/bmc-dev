@@ -1,0 +1,70 @@
+#!/bin/sh
+
+# Version 0.1
+
+# This script utilizes fw_printenv and fw_setenv to synchronize
+# MAC address information from primary U-Boot environment to the
+# backup U-Boot environment.
+
+# Assumptions: MAC addresses ('eth0addr' and 'eth1addr') are valid
+#              and intact in primary U-Boot environment
+#
+#              The MAC address 'eth2addr' for RSHIM is not synced,
+#              but the logic could be extended to do so.
+#
+
+# Check if we're running out of backup flash based on WDT2 Timeout Status
+# Register; if bit1 (0x2) is set it indicates 'second boot code' i.e. CS1
+FLASH_CP=`/sbin/devmem 0xf0800060`
+FLASH_CP=$((($FLASH_CP & 0x00100000) != 0))
+
+# Exit script if running from backup, only want to run from primary
+# so that field upgradeable primary image is always in control
+if [ $FLASH_CP != 0 ]; then
+    # Silently exit
+    exit 0
+fi
+
+# Read first MAC address from primary U-Boot env
+primary_eth0addr=`/sbin/fw_printenv eth0addr`
+if [ $? -ne 0 ] ; then
+    echo Error reading eth0addr value from primary flash
+    exit 1
+fi
+
+# Read second MAC address from primary U-Boot env
+primary_eth1addr=`/sbin/fw_printenv eth1addr`
+if [ $? -ne 0 ] ; then
+    echo Error reading eth1addr value from primary flash
+    exit 1
+fi
+
+primary_mac=`echo $primary_eth0addr | cut -d "=" -f 2`
+primary_mac1=`echo $primary_eth1addr | cut -d "=" -f 2`
+
+# Read both MAC addresses from backup U-Boot env
+backup_eth0addr=`/sbin/fw_printenv -c /etc/alt_fw_env.config eth0addr`
+backup_eth1addr=`/sbin/fw_printenv -c /etc/alt_fw_env.config eth1addr`
+
+# No need to check for fw_printenv errors, if it fails the
+# value returned will be empty and will trigger sync anyway
+
+backup_mac=`echo $backup_eth0addr | cut -d "=" -f 2`
+backup_mac1=`echo $backup_eth1addr | cut -d "=" -f 2`
+
+# If backup 'eth0addr' does not exist or is different
+# from primary 'eth0addr', then set it in backup flash
+if [ -z $backup_mac ] || [ $primary_mac != $backup_mac ]; then
+    echo Primary eth0addr $primary_mac Backup eth0addr $backup_mac, will sync
+    /sbin/fw_setenv -c /etc/alt_fw_env.config eth0addr $primary_mac
+fi
+
+# If backup 'eth1addr' does not exist or is different
+# from primary 'eth1addr', then set it in backup flash
+if [ -z $backup_mac1 ] || [ $primary_mac1 != $backup_mac1 ]; then
+    echo Primary eth1addr $primary_mac1 Backup eth1addr $backup_mac1, will sync
+    /sbin/fw_setenv -c /etc/alt_fw_env.config eth1addr $primary_mac1
+fi
+
+# Exit successfully
+exit 0
